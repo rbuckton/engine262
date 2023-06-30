@@ -1,6 +1,7 @@
 // @ts-nocheck
 import {
   Descriptor,
+  ObjectValue,
   Value,
 } from '../value.mjs';
 import { NewGlobalEnvironment } from '../environment.mjs';
@@ -85,7 +86,10 @@ import {
   DefinePropertyOrThrow,
   F as toNumberValue,
   OrdinaryObjectCreate,
+  type FunctionObjectValue,
+  type BuiltinFunctionObjectValue,
 } from './all.mjs';
+import type { ResolvedHostDefinedOptions } from '../engine.mjs';
 
 /** https://tc39.es/ecma262/#sec-code-realms */
 export class Realm {
@@ -94,7 +98,7 @@ export class Realm {
   GlobalEnv;
   TemplateMap;
   LoadedModules;
-  HostDefined;
+  HostDefined!: ResolvedHostDefinedOptions; // NOTE: unsound definite assignment operator (`!`)
   randomState;
 
   mark(m) {
@@ -138,6 +142,157 @@ function AddRestrictedFunctionProperties(F, realm) {
     Enumerable: Value.false,
     Configurable: Value.true,
   })));
+}
+
+type IntrinsicFlag =
+  | 'is-constructor'
+  | 'is-prototype'
+  | 'has-prototype';
+
+interface IntrinsicInfo<V extends Value, Flags extends IntrinsicFlag = never> {
+  Type: V;
+  Flags: IntrinsicFlag;
+}
+
+/** Find the names of any intrinsic with all of the requested flags. */
+type FindIntrinsic<Flags extends IntrinsicFlag> = {
+  [P in keyof Intrinsics]: Flags extends Intrinsics[P]['Flags'] ? P : never;
+}[keyof Intrinsics];
+
+/**
+ * For a given intrinsic name, return the nested intrinsic name for the given property on that intrinsic.
+ */
+type NestedIntrinsic<S extends `%${string}%`, P extends string> = S extends `%${infer N}%` ? `%${N}.${P}%` : never;
+
+/** The names of all well-known intrinsic objects */
+export type Intrinsic = keyof Intrinsics;
+
+/** The names of all well-known intrinsic objects that are prototypes */
+export type IntrinsicPrototype = FindIntrinsic<'is-prototype'>;
+
+/** The names of all well-known intrinsic objects that are constructors */
+export type IntrinsicConstructor = FindIntrinsic<'is-constructor'>;
+
+/** https://tc39.es/ecma262/#table-well-known-intrinsic-objects */
+export interface Intrinsics {
+  '%AggregateError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%AggregateError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Array.prototype.values%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%ArrayBuffer%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%ArrayBuffer.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%ArrayIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%AsyncFromSyncIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%AsyncFunction%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%AsyncFunction.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%AsyncGeneratorFunction%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%AsyncGeneratorFunction.prototype%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-prototype'>;
+  '%AsyncGeneratorFunction.prototype.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%AsyncIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Atomics%': IntrinsicInfo<ObjectValue>;
+  '%BigInt%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%BigInt.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%BigInt64Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%BigInt64Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%BigUint64Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%BigUint64Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Boolean%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Boolean.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%DataView%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%DataView.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Date%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Date.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%decodeURI%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%decodeURIComponent%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%encodeURI%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%encodeURIComponent%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%Error%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Error.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%eval%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%EvalError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%EvalError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%FinalizationRegistry%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%FinalizationRegistry.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Float32Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Float32Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Float64Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Float64Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%ForInIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Function%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Function.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%GeneratorFunction%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%GeneratorFunction.prototype%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-prototype'>;
+  '%GeneratorFunction.prototype.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%GeneratorFunction.prototype.prototype.next%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%Int8Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Int8Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Int16Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Int16Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Int32Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Int32Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%isFinite%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%isNaN%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%IteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%JSON%': IntrinsicInfo<ObjectValue>;
+  '%JSON.parse%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%Map%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Map.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%MapIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Math%': IntrinsicInfo<ObjectValue>;
+  '%Number%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Number.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Object%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Object.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Object.prototype.toString%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%Object.prototype.valueOf%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%parseFloat%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%parseInt%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%Promise%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Promise.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Promise.prototype.then%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%Proxy%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Proxy.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%RangeError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%RangeError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%ReferenceError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%ReferenceError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Reflect%': IntrinsicInfo<ObjectValue>;
+  '%RegExp%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%RegExp.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%RegExpStringIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Set%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Set.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%SetIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%SharedArrayBuffer%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%SharedArrayBuffer.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%String%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%String.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%StringIteratorPrototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Symbol%': IntrinsicInfo<BuiltinFunctionObjectValue, ('has-prototype')>;
+  '%SyntaxError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%SyntaxError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%ThrowTypeError%': IntrinsicInfo<BuiltinFunctionObjectValue>;
+  '%TypedArray%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%TypedArray.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%TypeError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%TypeError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Uint8Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Uint8Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Uint8ClampedArray%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Uint8ClampedArray.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Uint16Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Uint16Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%Uint32Array%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%Uint32Array.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%URIError%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%URIError.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%WeakMap%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%WeakMap.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%WeakRef%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%WeakRef.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
+  '%WeakSet%': IntrinsicInfo<BuiltinFunctionObjectValue, 'is-constructor'>;
+  '%WeakSet.prototype%': IntrinsicInfo<ObjectValue, 'is-prototype'>;
 }
 
 /** https://tc39.es/ecma262/#sec-createintrinsics */

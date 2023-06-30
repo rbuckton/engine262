@@ -4,15 +4,20 @@ import { surroundingAgent } from '../engine.mjs';
 import {
   GetIdentifierReference,
   EnvironmentRecord,
+  FunctionEnvironmentRecord,
+  GlobalEnvironmentRecord,
+  ModuleEnvironmentRecord,
 } from '../environment.mjs';
-import { Value } from '../value.mjs';
+import type { AbstractModuleRecord, CyclicModuleRecord } from '../modules.mjs';
+import type { ScriptRecord } from '../parse.mjs';
+import { NullValue, Value } from '../value.mjs';
 import { Assert } from './all.mjs';
 
 // This file covers abstract operations defined in
 /** https://tc39.es/ecma262/#sec-execution-contexts */
 
 /** https://tc39.es/ecma262/#sec-getactivescriptormodule */
-export function GetActiveScriptOrModule() {
+export function GetActiveScriptOrModule(): ScriptRecord | CyclicModuleRecord | NullValue {
   for (let i = surroundingAgent.executionContextStack.length - 1; i >= 0; i -= 1) {
     const e = surroundingAgent.executionContextStack[i];
     if (e.ScriptOrModule !== Value.null) {
@@ -33,7 +38,7 @@ export function ResolveBinding(name, env, strict) {
   Assert(env instanceof EnvironmentRecord);
   // 3. If the code matching the syntactic production that is being evaluated is contained in strict mode code, let strict be true; else let strict be false.
   // 4. Return ? GetIdentifierReference(env, name, strict).
-  return GetIdentifierReference(env, name, strict ? Value.true : Value.false);
+  return Q(GetIdentifierReference(env, name, strict ? Value.true : Value.false));
 }
 
 /** https://tc39.es/ecma262/#sec-getthisenvironment */
@@ -46,6 +51,8 @@ export function GetThisEnvironment() {
     const exists = env.HasThisBinding();
     // b. If exists is true, return envRec.
     if (exists === Value.true) {
+      // NON-SPEC: These are the only environment records that have a this binding.
+      Assert(env instanceof FunctionEnvironmentRecord || env instanceof GlobalEnvironmentRecord || env instanceof ModuleEnvironmentRecord);
       return env;
     }
     // c. Let outer be env.[[OuterEnv]].

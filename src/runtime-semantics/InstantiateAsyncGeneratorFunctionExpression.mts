@@ -17,7 +17,7 @@ import { NewDeclarativeEnvironment } from '../environment.mjs';
 //   AsyncGeneratorExpression :
 //     `async` `function` `*` `(` FormalParameters `)` `{` AsyncGeneratorBody `}`
 //     `async` `function` `*` BindingIdentifier `(` FormalParameters `)` `{` AsyncGeneratorBody `}`
-export function InstantiateAsyncGeneratorFunctionExpression(AsyncGeneratorExpression, name) {
+export function InstantiateAsyncGeneratorFunctionExpression(AsyncGeneratorExpression, name?) {
   const { BindingIdentifier, FormalParameters, AsyncGeneratorBody } = AsyncGeneratorExpression;
   if (BindingIdentifier) {
     // 1. Assert: name is not present.
@@ -29,7 +29,7 @@ export function InstantiateAsyncGeneratorFunctionExpression(AsyncGeneratorExpres
     // 4. Let funcEnv be NewDeclarativeEnvironment(scope).
     const funcEnv = NewDeclarativeEnvironment(scope);
     // 5. Perform funcEnv.CreateImmutableBinding(name, false).
-    funcEnv.CreateImmutableBinding(name, Value.false);
+    X(funcEnv.CreateImmutableBinding(name, Value.false));
     // 6. Let privateScope be the running execution context's PrivateEnvironment.
     const privateScope = surroundingAgent.runningExecutionContext.PrivateEnvironment;
     // 7. Let source text be the source textmatched by AsyncGeneratorExpression.
@@ -51,8 +51,8 @@ export function InstantiateAsyncGeneratorFunctionExpression(AsyncGeneratorExpres
         Configurable: Value.false,
       }),
     ));
-    // 12. Perform funcEnv.InitializeBinding(name, closure).
-    funcEnv.InitializeBinding(name, closure);
+    // 12. Perform ! funcEnv.InitializeBinding(name, closure).
+    X(funcEnv.InitializeBinding(name, closure));
     // 13. Return closure.
     return closure;
   }

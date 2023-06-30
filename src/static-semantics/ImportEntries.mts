@@ -1,7 +1,9 @@
 // @ts-nocheck
+import type { ImportEntryRecord } from '../modules.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 import { ImportEntriesForModule, ModuleRequests } from './all.mjs';
 
-export function ImportEntries(node) {
+export function ImportEntries(node: ParseNode): ImportEntryRecord[] {
   switch (node.type) {
     case 'Module':
       if (node.ModuleBody) {

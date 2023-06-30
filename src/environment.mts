@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { AbstractModuleRecord } from './modules.mjs';
 import {
   Descriptor,
@@ -7,8 +6,12 @@ import {
   ObjectValue,
   Value,
   wellKnownSymbols,
+  NullValue,
+  BooleanValue,
+  type StringValue,
+  PrivateName,
 } from './value.mjs';
-import { surroundingAgent } from './engine.mjs';
+import { surroundingAgent, type GCMarker } from './engine.mjs';
 import {
   Assert,
   DefinePropertyOrThrow,
@@ -17,47 +20,111 @@ import {
   HasProperty,
   IsDataDescriptor,
   IsExtensible,
-  IsPropertyKey,
   Set,
   ToBoolean,
-  isECMAScriptFunctionObject,
+  type ECMAScriptFunctionObjectValue,
 } from './abstract-ops/all.mjs';
-import { NormalCompletion, Q, X } from './completion.mjs';
+import {
+  NormalCompletion,
+  ThrowCompletion,
+  type UnusedOrThrowCompletion,
+  type ValueOrThrowCompletion,
+  type BooleanOrThrowCompletion,
+  unused,
+  Q, X, C, type ReferenceOrThrowCompletion,
+} from './completion.mjs';
 import { ValueMap } from './helpers.mjs';
 
 /** https://tc39.es/ecma262/#sec-environment-records */
-export class EnvironmentRecord {
-  OuterEnv;
+export abstract class EnvironmentRecord {
+  OuterEnv!: EnvironmentRecord | NullValue; // NOTE: unsound definite assignment operator (`!`)
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-hasbinding-n */
+  abstract HasBinding(N: StringValue): BooleanOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-createmutablebinding-n-d */
+  abstract CreateMutableBinding(N: StringValue, D: BooleanValue): UnusedOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-createimmutablebinding-n-s */
+  abstract CreateImmutableBinding(N: StringValue, S: BooleanValue): UnusedOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-initializebinding-n-v */
+  abstract InitializeBinding(N: StringValue, V: Value): UnusedOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-setmutablebinding-n-v-s */
+  abstract SetMutableBinding(N: StringValue, V: Value, S: BooleanValue): UnusedOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-getbindingvalue-n-s */
+  abstract GetBindingValue(N: StringValue, S: BooleanValue): ValueOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-deletebinding-n */
+  abstract DeleteBinding(N: StringValue): BooleanOrThrowCompletion;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-hasthisbinding */
+  abstract HasThisBinding(): BooleanValue;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-hassuperbinding */
+  abstract HasSuperBinding(): BooleanValue;
+
+  /** https://tc39.es/ecma262/#sec-declarative-environment-records-withbaseobject */
+  abstract WithBaseObject(): ObjectValue | UndefinedValue;
 
   // NON-SPEC
-  mark(m) {
+  mark(m: GCMarker) {
     m(this.OuterEnv);
   }
 }
 
+// NON-SPEC
+type Binding =
+  | DirectBinding
+  | IndirectBinding;
+
+// NON-SPEC
+interface DirectBinding {
+  indirect: false;
+  initialized: boolean;
+  mutable: boolean;
+  strict: boolean | undefined;
+  deletable: boolean;
+  value: Value | undefined;
+  mark(m: GCMarker): void;
+}
+
+// NON-SPEC
+interface IndirectBinding {
+  indirect: true;
+  initialized: true;
+  target: readonly [AbstractModuleRecord, StringValue];
+  strict?: undefined;
+  mutable?: undefined;
+  deletable?: undefined;
+  value?: undefined;
+  mark(m: GCMarker): void;
+}
+
 /** https://tc39.es/ecma262/#sec-declarative-environment-records */
 export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
-  bindings = new ValueMap();
+  // NON-SPEC
+  bindings = new ValueMap<StringValue, Binding>();
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-hasbinding-n */
-  HasBinding(N) {
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  HasBinding(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. If envRec has a binding for the name that is the value of N, return true.
+    // 1. If envRec has a binding for the name that is the value of N, return true.
     if (envRec.bindings.has(N)) {
-      return Value.true;
+      return C(Value.true);
     }
-    // 3. Return false.
-    return Value.false;
+    // 2. Return false.
+    return C(Value.false);
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-createmutablebinding-n-d */
-  CreateMutableBinding(N, D) {
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  CreateMutableBinding(N: StringValue, D: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec does not already have a binding for N.
+    // 1. Assert: envRec does not already have a binding for N.
     Assert(!envRec.bindings.has(N));
-    // 3. Create a mutable binding in envRec for N and record that it is uninitialized. If D
+    // 2. Create a mutable binding in envRec for N and record that it is uninitialized. If D
     //    is true, record that the newly created binding may be deleted by a subsequent
     //    DeleteBinding call.
     this.bindings.set(N, {
@@ -71,17 +138,16 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
         m(this.value);
       },
     });
-    //  4. Return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 3. Return unused.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-createimmutablebinding-n-s */
-  CreateImmutableBinding(N, S) {
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  CreateImmutableBinding(N: StringValue, S: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec does not already have a binding for N.
+    // 1. Assert: envRec does not already have a binding for N.
     Assert(!envRec.bindings.has(N));
-    // 3. Create an immutable binding in envRec for N and record that it is uninitialized. If
+    // 2. Create an immutable binding in envRec for N and record that it is uninitialized. If
     //    S is true, record that the newly created binding is a strict binding.
     this.bindings.set(N, {
       indirect: false,
@@ -94,295 +160,285 @@ export class DeclarativeEnvironmentRecord extends EnvironmentRecord {
         m(this.value);
       },
     });
-    // 4. Return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 3. Return unused.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-initializebinding-n-v */
-  InitializeBinding(N, V) {
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  InitializeBinding(N: StringValue, V: Value): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec must have an uninitialized binding for N.
+    // 1. Assert: envRec must have an uninitialized binding for N.
     const binding = envRec.bindings.get(N);
     Assert(binding !== undefined && binding.initialized === false);
-    // 3. Set the bound value for N in envRec to V.
+    // 2. Set the bound value for N in envRec to V.
     binding.value = V;
-    // 4. Record that the binding for N in envRec has been initialized.
+    // 3. Record that the binding for N in envRec has been initialized.
     binding.initialized = true;
-    // 5. Return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 4. Return unused.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-setmutablebinding-n-v-s */
-  SetMutableBinding(N, V, S) {
-    Assert(IsPropertyKey(N));
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  SetMutableBinding(N: StringValue, V: Value, S: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. If envRec does not have a binding for N, then
+    // 1. If envRec does not have a binding for N, then
     if (!envRec.bindings.has(N)) {
       // a. If S is true, throw a ReferenceError exception.
       if (S === Value.true) {
-        return surroundingAgent.Throw('ReferenceError', 'NotDefined', N);
+        return C(surroundingAgent.Throw('ReferenceError', 'NotDefined', N));
       }
-      // b. Perform envRec.CreateMutableBinding(N, true).
-      envRec.CreateMutableBinding(N, Value.true);
-      // c. Perform envRec.InitializeBinding(N, V).
-      envRec.InitializeBinding(N, V);
-      // d. Return NormalCompletion(empty).
-      return NormalCompletion(undefined);
+      // b. Perform ! envRec.CreateMutableBinding(N, true).
+      X(envRec.CreateMutableBinding(N, Value.true));
+      // c. Perform ! envRec.InitializeBinding(N, V).
+      X(envRec.InitializeBinding(N, V));
+      // d. Return unused.
+      return unused;
     }
-    const binding = this.bindings.get(N);
-    // 3. If the binding for N in envRec is a strict binding, set S to true.
+    const binding = this.bindings.get(N)!;
+    // 2. If the binding for N in envRec is a strict binding, set S to true.
     if (binding.strict === true) {
       S = Value.true;
     }
-    // 4. If the binding for N in envRec has not yet been initialized, throw a ReferenceError exception.
+    // 3. If the binding for N in envRec has not yet been initialized, throw a ReferenceError exception.
     if (binding.initialized === false) {
-      return surroundingAgent.Throw('ReferenceError', 'NotInitialized', N);
+      return C(surroundingAgent.Throw('ReferenceError', 'NotInitialized', N));
     }
-    // 5. Else if the binding for N in envRec is a mutable binding, change its bound value to V.
+    // 4. Else if the binding for N in envRec is a mutable binding, change its bound value to V.
     if (binding.mutable === true) {
       binding.value = V;
-    } else {
+    } else { // 5. Else,
       // a. Assert: This is an attempt to change the value of an immutable binding.
       // b. If S is true, throw a TypeError exception.
       if (S === Value.true) {
-        return surroundingAgent.Throw('TypeError', 'AssignmentToConstant', N);
+        return C(surroundingAgent.Throw('TypeError', 'AssignmentToConstant', N));
       }
     }
-    // 7. Return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 6. Return unused.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-getbindingvalue-n-s */
-  GetBindingValue(N) {
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  GetBindingValue(N: StringValue, _S: BooleanValue): ValueOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec has a binding for N.
+    // 1. Assert: envRec has a binding for N.
     const binding = envRec.bindings.get(N);
     Assert(binding !== undefined);
-    // 3. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
+    // 2. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
     if (binding.initialized === false) {
-      return surroundingAgent.Throw('ReferenceError', 'NotInitialized', N);
+      return C(surroundingAgent.Throw('ReferenceError', 'NotInitialized', N));
     }
-    // 4. Return the value currently bound to N in envRec.
-    return binding.value;
+    // 3. Return the value currently bound to N in envRec.
+    return C(binding.value!); // NOTE: unsound non-null assertion
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-deletebinding-n */
-  DeleteBinding(N) {
-    // 1. Let envRec be the declarative Environment Record for which the method was invoked.
+  DeleteBinding(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec has a binding for the name that is the value of N.
+    // 1. Assert: envRec has a binding for the name that is the value of N.
     const binding = envRec.bindings.get(N);
     Assert(binding !== undefined);
-    // 3. If the binding for N in envRec cannot be deleted, return false.
+    // 2. If the binding for N in envRec cannot be deleted, return false.
     if (binding.deletable === false) {
-      return Value.false;
+      return C(Value.false);
     }
-    // 4. Remove the binding for N from envRec.
+    // 3. Remove the binding for N from envRec.
     envRec.bindings.delete(N);
-    // 5. Return true.
-    return Value.true;
+    // 4. Return true.
+    return C(Value.true);
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-hasthisbinding */
-  HasThisBinding() {
+  HasThisBinding(): BooleanValue {
     // 1. Return false.
     return Value.false;
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-hassuperbinding */
-  HasSuperBinding() {
+  HasSuperBinding(): BooleanValue {
     // 1. Return false.
     return Value.false;
   }
 
   /** https://tc39.es/ecma262/#sec-declarative-environment-records-withbaseobject */
-  WithBaseObject() {
+  WithBaseObject(): ObjectValue | UndefinedValue {
     // 1. Return undefined.
     return Value.undefined;
   }
 
   // NON-SPEC
-  mark(m) {
+  override mark(m: GCMarker) {
     m(this.bindings);
   }
 }
 
 /** https://tc39.es/ecma262/#sec-object-environment-records */
 export class ObjectEnvironmentRecord extends EnvironmentRecord {
-  BindingObject;
-  IsWithEnvironment;
+  BindingObject!: ObjectValue; // NOTE: unsound definite assignment operator (`!`)
+  IsWithEnvironment!: BooleanValue; // NOTE: unsound definite assignment operator (`!`)
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-hasbinding-n */
-  HasBinding(N) {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  HasBinding(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let bindings be the binding object for envRec.
-    const bindings = envRec.BindingObject;
-    // 3. Let foundBinding be ? HasProperty(bindings, N).
-    const foundBinding = Q(HasProperty(bindings, N));
-    // 4. If foundBinding is false, return false.
+    // 1. Let bindingObject be envRec.[[BindingObject]].
+    const bindingObject = envRec.BindingObject;
+    // 2. Let foundBinding be ? HasProperty(bindingObject, N).
+    const foundBinding = Q(HasProperty(bindingObject, N));
+    // 3. If foundBinding is false, return false.
     if (foundBinding === Value.false) {
-      return Value.false;
+      return C(Value.false);
     }
-    // 5. If the IsWithEnvironment flag of envRec i s false, return true.
+    // 4. If envRec.[[IsWithEnvironment]] is false, return true.
     if (envRec.IsWithEnvironment === Value.false) {
-      return Value.true;
+      return C(Value.true);
     }
-    // 6. Let unscopables be ? Get(bindings, @@unscopables).
-    const unscopables = Q(Get(bindings, wellKnownSymbols.unscopables));
-    // 7. If Type(unscopables) is Object, then
+    // 5. Let unscopables be ? Get(bindingObject, @@unscopables).
+    const unscopables = Q(Get(bindingObject, wellKnownSymbols.unscopables));
+    // 6. If Type(unscopables) is Object, then
     if (unscopables instanceof ObjectValue) {
       // a. Let blocked be ! ToBoolean(? Get(unscopables, N)).
-      const blocked = X(ToBoolean(Q(Get(unscopables, N))));
+      const blocked = ToBoolean(Q(Get(unscopables, N)));
       // b. If blocked is true, return false.
       if (blocked === Value.true) {
-        return Value.false;
+        return C(Value.false);
       }
     }
-    // 8. Return true.
-    return Value.true;
+    // 7. Return true.
+    return C(Value.true);
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-createmutablebinding-n-d */
-  CreateMutableBinding(N, D) {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  CreateMutableBinding(N: StringValue, D: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let envRec be the object Environment Record for which the method was invoked.
-    const bindings = envRec.BindingObject;
-    // 3. Return ? DefinePropertyOrThrow(bindings, N, PropertyDescriptor { [[Value]]: undefined, [[Writable]]: true, [[Enumerable]]: true, [[Configurable]]: D }).
-    return Q(DefinePropertyOrThrow(bindings, N, Descriptor({
+    // 1. Let bindingObject be envRec.[[BindingObject]].
+    const bindingObject = envRec.BindingObject;
+    // 2. Perform ? DefinePropertyOrThrow(bindings, N, PropertyDescriptor { [[Value]]: undefined, [[Writable]]: true, [[Enumerable]]: true, [[Configurable]]: D }).
+    Q(DefinePropertyOrThrow(bindingObject, N, Descriptor({
       Value: Value.undefined,
       Writable: Value.true,
       Enumerable: Value.true,
       Configurable: D,
     })));
+    // 3. Return unused
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-createimmutablebinding-n-s */
-  CreateImmutableBinding(_N, _S) {
+  CreateImmutableBinding(_N: StringValue, _S: BooleanValue): never {
     Assert(false, 'CreateImmutableBinding called on an Object Environment Record');
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-initializebinding-n-v */
-  InitializeBinding(N, V) {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  InitializeBinding(N: StringValue, V: Value): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec must have an uninitialized binding for N.
-    // 3. Record that the binding for N in envRec has been initialized.
-    // 4. Return ? envRec.SetMutableBinding(N, V, false).
-    return Q(envRec.SetMutableBinding(N, V, Value.false));
+    // 1. Perform ? envRec.SetMutableBinding(N, V, false).
+    Q(envRec.SetMutableBinding(N, V, Value.false));
+    // 2. Return unused.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-setmutablebinding-n-v-s */
-  SetMutableBinding(N, V, S) {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  SetMutableBinding(N: StringValue, V: Value, S: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let bindings be the binding object for envRec.
-    const bindings = envRec.BindingObject;
-    // 3. Let stillExists be ? HasProperty(bindings, N).
-    const stillExists = Q(HasProperty(bindings, N));
-    // 4. If stillExists is false and S is true, throw a ReferenceError exception.
+    // 1. Let bindingObject be envRec.[[BindingObject]].
+    const bindingObject = envRec.BindingObject;
+    // 2. Let stillExists be ? HasProperty(bindingObject, N).
+    const stillExists = Q(HasProperty(bindingObject, N));
+    // 3. If stillExists is false and S is true, throw a ReferenceError exception.
     if (stillExists === Value.false && S === Value.true) {
-      return surroundingAgent.Throw('ReferenceError', 'NotDefined', N);
+      return C(surroundingAgent.Throw('ReferenceError', 'NotDefined', N));
     }
-    // 5. Return ? Set(bindings, N, V, S).
-    return Q(Set(bindings, N, V, S));
+    // 4. Perform ? Set(bindingObject, N, V, S).
+    Q(Set(bindingObject, N, V, S));
+    // 5. Return unused.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-getbindingvalue-n-s */
-  GetBindingValue(N, S) {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  GetBindingValue(N: StringValue, S: BooleanValue): ValueOrThrowCompletion {
     const envRec = this;
-    // 2. Let bindings be the binding object for envRec.
-    const bindings = envRec.BindingObject;
-    // 3. Let value be ? HasProperty(bindings, N).
-    const value = Q(HasProperty(bindings, N));
-    // 4. If value is false, then
+    // 1. Let bindingObject be the binding object for envRec.
+    const bindingObject = envRec.BindingObject;
+    // 2. Let value be ? HasProperty(bindingObject, N).
+    const value = Q(HasProperty(bindingObject, N));
+    // 3. If value is false, then
     if (value === Value.false) {
       // a. If S is false, return the value undefined; otherwise throw a ReferenceError exception.
       if (S === Value.false) {
-        return Value.undefined;
+        return C(Value.undefined);
       } else {
         return surroundingAgent.Throw('ReferenceError', 'NotDefined', N);
       }
     }
-    // 5. Return ? Get(bindings, N).
-    return Q(Get(bindings, N));
+    // 4. Return ? Get(bindingObject, N).
+    return C(Q(Get(bindingObject, N)));
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-deletebinding-n */
-  DeleteBinding(N) {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  DeleteBinding(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let bindings be the binding object for envRec.
-    const bindings = envRec.BindingObject;
-    // 3. Return ? bindings.[[Delete]](N).
-    return Q(bindings.Delete(N));
+    // 1. Let bindingObject be envRec.[[BindingObject]].
+    const bindingObject = envRec.BindingObject;
+    // 3. Return ? bindingObject.[[Delete]](N).
+    return C(Q(bindingObject.Delete(N)));
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-hasthisbinding */
-  HasThisBinding() {
+  HasThisBinding(): BooleanValue {
     // 1. Return false.
     return Value.false;
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-hassuperbinding */
-  HasSuperBinding() {
+  HasSuperBinding(): BooleanValue {
     // 1. Return falase.
     return Value.false;
   }
 
   /** https://tc39.es/ecma262/#sec-object-environment-records-withbaseobject */
-  WithBaseObject() {
-    // 1. Let envRec be the object Environment Record for which the method was invoked.
+  WithBaseObject(): ObjectValue | UndefinedValue {
     const envRec = this;
-    // 2. If the IsWithEnvironment flag of envRec is true, return the binding object for envRec.
+    // 1. If envRec.[[IsWithEnvironment]] is true, return envRec.[[BindingObject]].
     if (envRec.IsWithEnvironment === Value.true) {
       return envRec.BindingObject;
     }
-    // 3. Otherwise, return undefined.
+    // 2. Otherwise, return undefined.
     return Value.undefined;
   }
 
   // NON-SPEC
-  mark(m) {
+  override mark(m: GCMarker) {
     m(this.BindingObject);
   }
 }
 
 /** https://tc39.es/ecma262/#sec-function-environment-records */
 export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
-  ThisValue;
-  ThisBindingStatus;
-  FunctionObject;
-  NewTarget;
+  ThisValue!: Value; // NOTE: unsound definite assignment operator (`!`)
+  ThisBindingStatus!: 'lexical' | 'initialized' | 'uninitialized'; // NOTE: unsound definite assignment operator (`!`)
+  FunctionObject!: ECMAScriptFunctionObjectValue; // NOTE: unsound definite assignment operator (`!`)
+  NewTarget!: ObjectValue | UndefinedValue; // NOTE: unsound definite assignment operator (`!`)
 
   /** https://tc39.es/ecma262/#sec-bindthisvalue */
-  BindThisValue(V) {
-    // 1. Let envRec be the function Environment Record for which the method was invoked.
+  BindThisValue(V: Value): ValueOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec.[[ThisBindingStatus]] is not lexical.
+    // 1. Assert: envRec.[[ThisBindingStatus]] is not lexical.
     Assert(envRec.ThisBindingStatus !== 'lexical');
-    // 3. If envRec.[[ThisBindingStatus]] is initialized, throw a ReferenceError exception.
+    // 2. If envRec.[[ThisBindingStatus]] is initialized, throw a ReferenceError exception.
     if (envRec.ThisBindingStatus === 'initialized') {
-      return surroundingAgent.Throw('ReferenceError', 'InvalidThis');
+      return C(surroundingAgent.Throw('ReferenceError', 'InvalidThis'));
     }
-    // 4. Set envRec.[[ThisValue]] to V.
+    // 3. Set envRec.[[ThisValue]] to V.
     envRec.ThisValue = V;
-    // 5. Set envRec.[[ThisBindingStatus]] to initialized.
+    // 4. Set envRec.[[ThisBindingStatus]] to initialized.
     envRec.ThisBindingStatus = 'initialized';
-    // 6. Return V.
-    return V;
+    // 5. Return V.
+    return C(V);
   }
 
   /** https://tc39.es/ecma262/#sec-function-environment-records-hasthisbinding */
-  HasThisBinding() {
-    // 1. Let envRec be the function Environment Record for which the method was invoked.
+  override HasThisBinding(): BooleanValue {
     const envRec = this;
-    // 2. If envRec.[[ThisBindingStatus]] is lexical, return false; otherwise, return true.
+    // 1. If envRec.[[ThisBindingStatus]] is lexical, return false; otherwise, return true.
     if (envRec.ThisBindingStatus === 'lexical') {
       return Value.false;
     } else {
@@ -391,7 +447,7 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
   }
 
   /** https://tc39.es/ecma262/#sec-function-environment-records-hassuperbinding */
-  HasSuperBinding() {
+  override HasSuperBinding(): BooleanValue {
     const envRec = this;
     // 1. If envRec.[[ThisBindingStatus]] is lexical, return false.
     if (envRec.ThisBindingStatus === 'lexical') {
@@ -406,35 +462,34 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
   }
 
   /** https://tc39.es/ecma262/#sec-function-environment-records-getthisbinding */
-  GetThisBinding() {
-    // 1. Let envRec be the function Environment Record for which the method was invoked.
+  GetThisBinding(): ValueOrThrowCompletion {
     const envRec = this;
-    // 2. Assert: envRec.[[ThisBindingStatus]] is not lexical.
+    // 1. Assert: envRec.[[ThisBindingStatus]] is not lexical.
     Assert(envRec.ThisBindingStatus !== 'lexical');
-    // 3. If envRec.[[ThisBindingStatus]] is uninitialized, throw a ReferenceError exception.
+    // 2. If envRec.[[ThisBindingStatus]] is uninitialized, throw a ReferenceError exception.
     if (envRec.ThisBindingStatus === 'uninitialized') {
       return surroundingAgent.Throw('ReferenceError', 'InvalidThis');
     }
-    // 4. Return envRec.[[ThisValue]].
-    return envRec.ThisValue;
+    // 3. Return envRec.[[ThisValue]].
+    return C(envRec.ThisValue);
   }
 
   /** https://tc39.es/ecma262/#sec-getsuperbase */
-  GetSuperBase() {
+  GetSuperBase(): NormalCompletion<ObjectValue | NullValue | UndefinedValue> | ThrowCompletion {
     const envRec = this;
     // 1. Let home be envRec.[[FunctionObject]].[[HomeObject]].
     const home = envRec.FunctionObject.HomeObject;
     // 2. If home has the value undefined, return undefined.
     if (home === Value.undefined) {
-      return Value.undefined;
+      return C(Value.undefined);
     }
     // 3. Assert: Type(home) is Object.
     Assert(home instanceof ObjectValue);
     // 4. Return ? home.[[GetPrototypeOf]]().
-    return Q(home.GetPrototypeOf());
+    return C(Q(home.GetPrototypeOf()));
   }
 
-  mark(m) {
+  override mark(m: GCMarker) {
     super.mark(m);
     m(this.ThisValue);
     m(this.FunctionObject);
@@ -444,307 +499,289 @@ export class FunctionEnvironmentRecord extends DeclarativeEnvironmentRecord {
 
 /** https://tc39.es/ecma262/#sec-global-environment-records */
 export class GlobalEnvironmentRecord extends EnvironmentRecord {
-  ObjectRecord;
-  GlobalThisValue;
-  DeclarativeRecord;
-  VarNames;
+  ObjectRecord!: ObjectEnvironmentRecord; // NOTE: unsound definite assignment operator (`!`)
+  GlobalThisValue!: ObjectValue; // NOTE: unsound definite assignment operator (`!`)
+  DeclarativeRecord!: DeclarativeEnvironmentRecord; // NOTE: unsound definite assignment operator (`!`)
+  VarNames!: StringValue[]; // NOTE: unsound definite assignment operator (`!`)
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-hasbinding-n */
-  HasBinding(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  HasBinding(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. If DclRec.HasBinding(N) is true, return true.
-    if (DclRec.HasBinding(N) === Value.true) {
-      return Value.true;
+    // 2. If ! DclRec.HasBinding(N) is true, return true.
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      return C(Value.true);
     }
-    // 4. If DclRec.HasBinding(N) is true, return true.
+    // 3. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 5. Let ObjRec be envRec.[[ObjectRecord]].
-    return ObjRec.HasBinding(N);
+    // 4. Return ? ObjRec.HasBinding(N).
+    return C(Q(ObjRec.HasBinding(N)));
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-createmutablebinding-n-d */
-  CreateMutableBinding(N, D) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  CreateMutableBinding(N: StringValue, D: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. If DclRec.HasBinding(N) is true, throw a TypeError exception.
-    if (DclRec.HasBinding(N) === Value.true) {
-      return surroundingAgent.Throw('TypeError', 'AlreadyDeclared', N);
+    // 2. If ! DclRec.HasBinding(N) is true, throw a TypeError exception.
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      return C(surroundingAgent.Throw('TypeError', 'AlreadyDeclared', N));
     }
-    // 4. Return DclRec.CreateMutableBinding(N, D).
-    return DclRec.CreateMutableBinding(N, D);
+    // 3. Return ! DclRec.CreateMutableBinding(N, D).
+    return C(X(DclRec.CreateMutableBinding(N, D)));
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-createimmutablebinding-n-s */
-  CreateImmutableBinding(N, S) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  CreateImmutableBinding(N: StringValue, S: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. If DclRec.HasBinding(N) is true, throw a TypeError exception.
-    if (DclRec.HasBinding(N) === Value.true) {
-      return surroundingAgent.Throw('TypeError', 'AlreadyDeclared', N);
+    // 2. If ! DclRec.HasBinding(N) is true, throw a TypeError exception.
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      return C(surroundingAgent.Throw('TypeError', 'AlreadyDeclared', N));
     }
-    // Return DclRec.CreateImmutableBinding(N, S).
-    return DclRec.CreateImmutableBinding(N, S);
+    // 3. Return ! DclRec.CreateImmutableBinding(N, S).
+    return C(X(DclRec.CreateImmutableBinding(N, S)));
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-initializebinding-n-v */
-  InitializeBinding(N, V) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  InitializeBinding(N: StringValue, V: Value): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. If DclRec.HasBinding(N) is true, then
-    if (DclRec.HasBinding(N) === Value.true) {
-      // a. Return DclRec.InitializeBinding(N, V).
-      return DclRec.InitializeBinding(N, V);
+    // 2. If ! DclRec.HasBinding(N) is true, then
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      // a. Return ! DclRec.InitializeBinding(N, V).
+      return C(X(DclRec.InitializeBinding(N, V)));
     }
-    // 4. Assert: If the binding exists, it must be in the object Environment Record.
-    // 5. Let ObjRec be envRec.[[ObjectRecord]].
+    // 3. Assert: If the binding exists, it must be in the object Environment Record.
+    // 4. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 6. Return ? ObjRec.InitializeBinding(N, V).
-    return ObjRec.InitializeBinding(N, V);
+    // 4. Return ? ObjRec.InitializeBinding(N, V).
+    return C(Q(ObjRec.InitializeBinding(N, V)));
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-setmutablebinding-n-v-s */
-  SetMutableBinding(N, V, S) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  SetMutableBinding(N: StringValue, V: Value, S: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. If DclRec.HasBinding(N) is true, then
-    if (DclRec.HasBinding(N) === Value.true) {
-      // a. Return DclRec.SetMutableBinding(N, V, S).
-      return DclRec.SetMutableBinding(N, V, S);
+    // 2. If ! DclRec.HasBinding(N) is true, then
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      // a. Return ? DclRec.SetMutableBinding(N, V, S).
+      return C(Q(DclRec.SetMutableBinding(N, V, S)));
     }
     // 4. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
     // 5. Return ? ObjRec.SetMutableBinding(N, V, S).
-    return Q(ObjRec.SetMutableBinding(N, V, S));
+    return C(Q(ObjRec.SetMutableBinding(N, V, S)));
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-getbindingvalue-n-s */
-  GetBindingValue(N, S) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  GetBindingValue(N: StringValue, S: BooleanValue): ValueOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. If DclRec.HasBinding(N) is true, then
-    if (DclRec.HasBinding(N) === Value.true) {
-      // a. Return DclRec.GetBindingValue(N, S).
-      return DclRec.GetBindingValue(N, S);
+    // 2. If ! DclRec.HasBinding(N) is true, then
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      // a. Return ? DclRec.GetBindingValue(N, S).
+      return C(Q(DclRec.GetBindingValue(N, S)));
     }
-    // 4. Let ObjRec be envRec.[[ObjectRecord]].
+    // 3. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 5. Return ? ObjRec.GetBindingValue(N, S).
-    return Q(ObjRec.GetBindingValue(N, S));
+    // 4. Return ? ObjRec.GetBindingValue(N, S).
+    return C(Q(ObjRec.GetBindingValue(N, S)));
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-deletebinding-n */
-  DeleteBinding(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  DeleteBinding(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let DclRec be envRec.[[DeclarativeRecord]].
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = this.DeclarativeRecord;
-    // 3. Let DclRec be envRec.[[DeclarativeRecord]].
-    if (DclRec.HasBinding(N) === Value.true) {
-      // a. Return DclRec.DeleteBinding(N).
-      return Q(DclRec.DeleteBinding(N));
+    // 2. If ! DclRec.HasBinding(N) is true, then
+    if (X(DclRec.HasBinding(N)) === Value.true) {
+      // a. Return ! DclRec.DeleteBinding(N).
+      return C(X(DclRec.DeleteBinding(N)));
     }
-    // 4. Let ObjRec be envRec.[[ObjectRecord]].
+    // 3. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 5. Let globalObject be the binding object for ObjRec.
+    // 4. Let globalObject be the binding object for ObjRec.
     const globalObject = ObjRec.BindingObject;
-    // 6. Let existingProp be ? HasOwnProperty(globalObject, N).
+    // 5. Let existingProp be ? HasOwnProperty(globalObject, N).
     const existingProp = Q(HasOwnProperty(globalObject, N));
-    // 7. If existingProp is true, then
+    // 6. If existingProp is true, then
     if (existingProp === Value.true) {
       // a. Let status be ? ObjRec.DeleteBinding(N).
       const status = Q(ObjRec.DeleteBinding(N));
-      // b. If status is true, then
+      // b. If status is true ...
       if (status === Value.true) {
-        // i. Let varNames be envRec.[[VarNames]].
-        const varNames = envRec.VarNames;
-        // ii. If N is an element of varNames, remove that element from the varNames.
-        const i = varNames.findIndex((v) => v.stringValue() === N.stringValue());
+        // ... and envRec.[[VarNames]] contains N, then
+        const i = envRec.VarNames.findIndex((v) => v.stringValue() === N.stringValue());
         if (i >= 0) {
-          varNames.splice(i, 1);
+          // i. Remove N from envRec.[[VarNames]].
+          envRec.VarNames.splice(i, 1);
         }
       }
       // c. Return status.
-      return status;
+      return C(status);
     }
-    // 8. Return true.
-    return Value.true;
+    // 7. Return true.
+    return C(Value.true);
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-hasthisbinding */
-  HasThisBinding() {
+  HasThisBinding(): BooleanValue {
     // Return true.
     return Value.true;
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-hassuperbinding */
-  HasSuperBinding() {
+  HasSuperBinding(): BooleanValue {
     // 1. Return false.
     return Value.false;
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-withbaseobject */
-  WithBaseObject() {
+  WithBaseObject(): ObjectValue | UndefinedValue {
     // 1. Return undefined.
     return Value.undefined;
   }
 
   /** https://tc39.es/ecma262/#sec-global-environment-records-getthisbinding */
-  GetThisBinding() {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  GetThisBinding(): NormalCompletion<ObjectValue> {
     const envRec = this;
-    // 2. Return envRec.[[GlobalThisValue]].
-    return envRec.GlobalThisValue;
+    // 1. Return envRec.[[GlobalThisValue]].
+    return C(envRec.GlobalThisValue);
   }
 
   /** https://tc39.es/ecma262/#sec-hasvardeclaration */
-  HasVarDeclaration(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  HasVarDeclaration(N: StringValue): BooleanValue {
     const envRec = this;
-    // 2. Let varDeclaredNames be envRec.[[VarNames]].
+    // 1. Let varDeclaredNames be envRec.[[VarNames]].
     const varDeclaredNames = envRec.VarNames;
-    // 3. If varDeclaredNames contains N, return true.
+    // 2. If varDeclaredNames contains N, return true.
     if (varDeclaredNames.some((v) => v.stringValue() === N.stringValue())) {
       return Value.true;
     }
-    // 4. Return false.
+    // 3. Return false.
     return Value.false;
   }
 
   /** https://tc39.es/ecma262/#sec-haslexicaldeclaration */
-  HasLexicalDeclaration(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  HasLexicalDeclaration(N: StringValue): BooleanValue {
     const envRec = this;
-    // 2. Let envRec be the global Environment Record for which the method was invoked.
+    // 1. Let DclRec be envRec.[[DeclarativeRecord]].
     const DclRec = envRec.DeclarativeRecord;
-    // 3. Let DclRec be envRec.[[DeclarativeRecord]].
-    return DclRec.HasBinding(N);
+    // 2. Return ! DclRec.HasBinding(N);
+    return X(DclRec.HasBinding(N));
   }
 
   /** https://tc39.es/ecma262/#sec-hasrestrictedglobalproperty */
-  HasRestrictedGlobalProperty(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  HasRestrictedGlobalProperty(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let ObjRec be envRec.[[ObjectRecord]].
+    // 1. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 3. Let globalObject be the binding object for ObjRec.
+    // 2. Let globalObject be the binding object for ObjRec.
     const globalObject = ObjRec.BindingObject;
-    // 4. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
+    // 3. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
     const existingProp = Q(globalObject.GetOwnProperty(N));
-    // 5. If existingProp is undefined, return false.
-    if (existingProp === Value.undefined) {
-      return Value.false;
+    // 4. If existingProp is undefined, return false.
+    if (existingProp instanceof UndefinedValue) {
+      return C(Value.false);
     }
-    // 6. If existingProp.[[Configurable]] is true, return false.
+    // 5. If existingProp.[[Configurable]] is true, return false.
     if (existingProp.Configurable === Value.true) {
-      return Value.false;
+      return C(Value.false);
     }
-    // Return true.
-    return Value.true;
+    // 6. Return true.
+    return C(Value.true);
   }
 
   /** https://tc39.es/ecma262/#sec-candeclareglobalvar */
-  CanDeclareGlobalVar(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  CanDeclareGlobalVar(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let ObjRec be envRec.[[ObjectRecord]].
+    // 1. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 3. Let globalObject be the binding object for ObjRec.
+    // 2. Let globalObject be the binding object for ObjRec.
     const globalObject = ObjRec.BindingObject;
-    // 4. Let hasProperty be ? HasOwnProperty(globalObject, N).
+    // 3. Let hasProperty be ? HasOwnProperty(globalObject, N).
     const hasProperty = Q(HasOwnProperty(globalObject, N));
-    // 5. If hasProperty is true, return true.
+    // 4. If hasProperty is true, return true.
     if (hasProperty === Value.true) {
-      return Value.true;
+      return C(Value.true);
     }
-    // 6. Return ? IsExtensible(globalObject).
-    return Q(IsExtensible(globalObject));
+    // 5. Return ? IsExtensible(globalObject).
+    return C(Q(IsExtensible(globalObject)));
   }
 
   /** https://tc39.es/ecma262/#sec-candeclareglobalfunction */
-  CanDeclareGlobalFunction(N) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  CanDeclareGlobalFunction(N: StringValue): BooleanOrThrowCompletion {
     const envRec = this;
-    // 2. Let ObjRec be envRec.[[ObjectRecord]].
+    // 1. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 3. Let globalObject be the binding object for ObjRec.
+    // 2. Let globalObject be ObjRec.[[BindingObject]].
     const globalObject = ObjRec.BindingObject;
-    // 4. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
+    // 3. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
     const existingProp = Q(globalObject.GetOwnProperty(N));
-    // 5. If existingProp is undefined, return ? IsExtensible(globalObject).
-    if (existingProp === Value.undefined) {
-      return Q(IsExtensible(globalObject));
+    // 4. If existingProp is undefined, return ? IsExtensible(globalObject).
+    if (existingProp instanceof UndefinedValue) {
+      return C(Q(IsExtensible(globalObject)));
     }
-    // 6. If existingProp.[[Configurable]] is true, return true.
+    // 5. If existingProp.[[Configurable]] is true, return true.
     if (existingProp.Configurable === Value.true) {
-      return Value.true;
+      return C(Value.true);
     }
-    // 7. If IsDataDescriptor(existingProp) is true and existingProp has attribute values
+    // 6. If IsDataDescriptor(existingProp) is true and existingProp has attribute values
     //    { [[Writable]]: true, [[Enumerable]]: true }, return true.
     if (IsDataDescriptor(existingProp) === true
         && existingProp.Writable === Value.true
         && existingProp.Enumerable === Value.true) {
-      return Value.true;
+      return C(Value.true);
     }
-    // 8. Return false.
-    return Value.false;
+    // 7. Return false.
+    return C(Value.false);
   }
 
   /** https://tc39.es/ecma262/#sec-createglobalvarbinding */
-  CreateGlobalVarBinding(N, D) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  CreateGlobalVarBinding(N: StringValue, D: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let ObjRec be envRec.[[ObjectRecord]].
+    // 1. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 3. Let globalObject be the binding object for ObjRec.
+    // 2. Let globalObject be ObjRec.[[BindingObject]].
     const globalObject = ObjRec.BindingObject;
-    // 4. Let hasProperty be ? HasOwnProperty(globalObject, N).
+    // 3. Let hasProperty be ? HasOwnProperty(globalObject, N).
     const hasProperty = Q(HasOwnProperty(globalObject, N));
-    // 5. Let extensible be ? IsExtensible(globalObject).
+    // 4. Let extensible be ? IsExtensible(globalObject).
     const extensible = Q(IsExtensible(globalObject));
-    // 6. If hasProperty is false and extensible is true, then
+    // 5. If hasProperty is false and extensible is true, then
     if (hasProperty === Value.false && extensible === Value.true) {
       // a. Perform ? ObjRec.CreateMutableBinding(N, D).
       Q(ObjRec.CreateMutableBinding(N, D));
       // b. Perform ? ObjRec.InitializeBinding(N, undefined).
       Q(ObjRec.InitializeBinding(N, Value.undefined));
     }
-    // 7. Let varDeclaredNames be envRec.[[VarNames]].
-    const varDeclaredNames = envRec.VarNames;
-    // 8. If varDeclaredNames does not contain N, then
-    if (!varDeclaredNames.some((v) => v.stringValue() === N.stringValue())) {
-      // a. Append N to varDeclaredNames.
-      varDeclaredNames.push(N);
+    // 6. If envRec.[[VarNames]] does not contain N, then
+    if (!envRec.VarNames.some((v) => v.stringValue() === N.stringValue())) {
+      // a. Append N to envRec.[[VarNames]].
+      envRec.VarNames.push(N);
     }
-    // return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 7. Return unusd.
+    return unused;
   }
 
   /** https://tc39.es/ecma262/#sec-createglobalfunctionbinding */
-  CreateGlobalFunctionBinding(N, V, D) {
-    // 1. Let envRec be the global Environment Record for which the method was invoked.
+  CreateGlobalFunctionBinding(N: StringValue, V: Value, D: BooleanValue): UnusedOrThrowCompletion {
     const envRec = this;
-    // 2. Let ObjRec be envRec.[[ObjectRecord]].
+    // 1. Let ObjRec be envRec.[[ObjectRecord]].
     const ObjRec = envRec.ObjectRecord;
-    // 3. Let globalObject be the binding object for ObjRec.
+    // 2. Let globalObject be ObjRec.[[BindingObject]].
     const globalObject = ObjRec.BindingObject;
-    // 4. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
+    // 3. Let existingProp be ? globalObject.[[GetOwnProperty]](N).
     const existingProp = Q(globalObject.GetOwnProperty(N));
-    // 5. If existingProp is undefined or existingProp.[[Configurable]] is true, then
-    let desc;
-    if (existingProp === Value.undefined || existingProp.Configurable === Value.true) {
+    // 4. If existingProp is undefined or existingProp.[[Configurable]] is true, then
+    let desc: Descriptor;
+    if (existingProp instanceof UndefinedValue || existingProp.Configurable === Value.true) {
       // a. Let desc be the PropertyDescriptor { [[Value]]: V, [[Writable]]: true, [[Enumerable]]: true, [[Configurable]]: D }.
       desc = Descriptor({
         Value: V,
@@ -752,29 +789,26 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
         Enumerable: Value.true,
         Configurable: D,
       });
-    } else {
+    } else { // 5. Else,
       // a. Let desc be the PropertyDescriptor { [[Value]]: V }.
       desc = Descriptor({
         Value: V,
       });
     }
-    // 7. Perform ? DefinePropertyOrThrow(globalObject, N, desc).
+    // 6. Perform ? DefinePropertyOrThrow(globalObject, N, desc).
     Q(DefinePropertyOrThrow(globalObject, N, desc));
-    // 8. Record that the binding for N in ObjRec has been initialized.
-    // 9. Perform ? Set(globalObject, N, V, false).
+    // 7. Perform ? Set(globalObject, N, V, false).
     Q(Set(globalObject, N, V, Value.false));
-    // 10. Let varDeclaredNames be envRec.[[VarNames]].
-    const varDeclaredNames = envRec.VarNames;
-    // 11. If varDeclaredNames does not contain N, then
-    if (!varDeclaredNames.some((v) => v.stringValue() === N.stringValue())) {
-      // a. Append N to varDeclaredNames.
-      varDeclaredNames.push(N);
+    // 8. If envRec.[[VarNames]] does not contain N, then
+    if (!envRec.VarNames.some((v) => v.stringValue() === N.stringValue())) {
+      // a. Append N to envRec.[[VarNames]].
+      envRec.VarNames.push(N);
     }
-    // 1. Return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 9. Return unused.
+    return unused;
   }
 
-  mark(m) {
+  override mark(m: GCMarker) {
     m(this.ObjectRecord);
     m(this.GlobalThisValue);
     m(this.DeclarativeRecord);
@@ -784,110 +818,106 @@ export class GlobalEnvironmentRecord extends EnvironmentRecord {
 /** https://tc39.es/ecma262/#sec-module-environment-records */
 export class ModuleEnvironmentRecord extends DeclarativeEnvironmentRecord {
   /** https://tc39.es/ecma262/#sec-module-environment-records-getbindingvalue-n-s */
-  GetBindingValue(N, S) {
+  override GetBindingValue(N: StringValue, S: BooleanValue): ValueOrThrowCompletion {
+    const envRec = this;
     // 1. Assert: S is true.
     Assert(S === Value.true);
-    // 2. Let envRec be the module Environment Record for which the method was invoked.
-    const envRec = this;
-    // 3. Assert: envRec has a binding for N.
+    // 2. Assert: envRec has a binding for N.
     const binding = envRec.bindings.get(N);
     Assert(binding !== undefined);
-    // 4. If the binding for N is an indirect binding, then
+    // 3. If the binding for N is an indirect binding, then
     if (binding.indirect === true) {
       // a. Let M and N2 be the indirection values provided when this binding for N was created.
       const [M, N2] = binding.target;
       // b.Let targetEnv be M.[[Environment]].
       const targetEnv = M.Environment;
-      // c. If targetEnv is undefined, throw a ReferenceError exception.
-      if (targetEnv === Value.undefined) {
-        return surroundingAgent.Throw('ReferenceError', 'NotDefined', N);
+      // c. If targetEnv is empty, throw a ReferenceError exception.
+      if (targetEnv === undefined) {
+        return C(surroundingAgent.Throw('ReferenceError', 'NotDefined', N));
       }
       // d. Return ? targetEnv.GetBindingValue(N2, true).
-      return Q(targetEnv.GetBindingValue(N2, Value.true));
+      return C(Q(targetEnv.GetBindingValue(N2, Value.true)));
     }
-    // 5. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
+    // 4. If the binding for N in envRec is an uninitialized binding, throw a ReferenceError exception.
     if (binding.initialized === false) {
-      return surroundingAgent.Throw('ReferenceError', 'NotInitialized', N);
+      return C(surroundingAgent.Throw('ReferenceError', 'NotInitialized', N));
     }
-    // 6. Return the value currently bound to N in envRec.
-    return binding.value;
+    // 5. Return the value currently bound to N in envRec.
+    return C(binding.value!); // NOTE: unsound non-null assertion
   }
 
   /** https://tc39.es/ecma262/#sec-module-environment-records-deletebinding-n */
-  DeleteBinding() {
+  override DeleteBinding(_N: StringValue): never {
     Assert(false, 'This method is never invoked. See #sec-delete-operator-static-semantics-early-errors');
   }
 
   /** https://tc39.es/ecma262/#sec-module-environment-records-hasthisbinding */
-  HasThisBinding() {
-    // Return true.
+  override HasThisBinding(): BooleanValue {
+    // 1. Return true.
     return Value.true;
   }
 
   /** https://tc39.es/ecma262/#sec-module-environment-records-getthisbinding */
-  GetThisBinding() {
-    // Return undefined.
-    return Value.undefined;
+  GetThisBinding(): NormalCompletion<UndefinedValue> {
+    // 1. Return undefined.
+    return C(Value.undefined);
   }
 
   /** https://tc39.es/ecma262/#sec-createimportbinding */
-  CreateImportBinding(N, M, N2) {
-    // 1. Let envRec be the module Environment Record for which the method was invoked.
+  CreateImportBinding(N: StringValue, M: AbstractModuleRecord, N2: StringValue): 'unused' {
     const envRec = this;
-    // 2. Assert: envRec does not already have a binding for N.
-    Assert(envRec.HasBinding(N) === Value.false);
-    // 3. Assert: M is a Module Record.
-    Assert(M instanceof AbstractModuleRecord);
-    // 4. Assert: When M.[[Environment]] is instantiated it will have a direct binding for N2.
-    // 5. Create an immutable indirect binding in envRec for N that references M and N2 as its target binding and record that the binding is initialized.
+    // 1. Assert: envRec does not already have a binding for N.
+    Assert(X(envRec.HasBinding(N)) === Value.false);
+    // 2. Assert: When M.[[Environment]] is instantiated it will have a direct binding for N2.
+    // 3. Create an immutable indirect binding in envRec for N that references M and N2 as its target binding and record that the binding is initialized.
     envRec.bindings.set(N, {
       indirect: true,
       target: [M, N2],
       initialized: true,
       mark(m) {
-        m(this.target[0]);
-        m(this.target[1]);
+        m(this.target![0]);
+        m(this.target![1]);
       },
     });
-    // 6. Return NormalCompletion(empty).
-    return NormalCompletion(undefined);
+    // 3. Return unused.
+    return 'unused';
   }
 }
 
 /** https://tc39.es/ecma262/#sec-getidentifierreference */
-export function GetIdentifierReference(env, name, strict) {
+export function GetIdentifierReference(env: EnvironmentRecord | NullValue, name: StringValue, strict: BooleanValue): ReferenceOrThrowCompletion {
   // 1. If lex is the value null, then
-  if (env === Value.null) {
+  if (env instanceof NullValue) {
     // a. Return the Reference Record { [[Base]]: unresolvable, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
-    return new ReferenceRecord({
+    return C(new ReferenceRecord({
       Base: 'unresolvable',
       ReferencedName: name,
       Strict: strict,
       ThisValue: undefined,
-    });
+    }));
   }
   // 2. Let exists be ? envRec.HasBinding(name).
   const exists = Q(env.HasBinding(name));
   // 3. If exists is true, then
   if (exists === Value.true) {
     // a. Return the Reference Record { [[Base]]: env, [[ReferencedName]]: name, [[Strict]]: strict, [[ThisValue]]: empty }.
-    return new ReferenceRecord({
+    return C(new ReferenceRecord({
       Base: env,
       ReferencedName: name,
       Strict: strict,
       ThisValue: undefined,
-    });
+    }));
   } else {
     // a. Let outer be env.[[OuterEnv]].
     const outer = env.OuterEnv;
     // b. Return ? GetIdentifierReference(outer, name, strict).
-    return Q(GetIdentifierReference(outer, name, strict));
+    return C(Q(GetIdentifierReference(outer, name, strict)));
   }
 }
 
 /** https://tc39.es/ecma262/#sec-newdeclarativeenvironment */
-export function NewDeclarativeEnvironment(E) {
-  // 1. Let env be a new declarative Environment Record containing O as the binding object.
+export function NewDeclarativeEnvironment(E: EnvironmentRecord | NullValue): DeclarativeEnvironmentRecord {
+  // 1. Let env be a new Declarative Environment Record containing no bindings.
   const env = new DeclarativeEnvironmentRecord();
   // 2. Set env.[[OuterEnv]] to E.
   env.OuterEnv = E;
@@ -896,7 +926,7 @@ export function NewDeclarativeEnvironment(E) {
 }
 
 /** https://tc39.es/ecma262/#sec-newobjectenvironment */
-export function NewObjectEnvironment(O, W, E) {
+export function NewObjectEnvironment(O: ObjectValue, W: BooleanValue, E: EnvironmentRecord | NullValue): ObjectEnvironmentRecord {
   // 1. Let env be a new object Environment Record.
   const env = new ObjectEnvironmentRecord();
   // 2. Set env.[[BindingObject]] to O.
@@ -910,35 +940,31 @@ export function NewObjectEnvironment(O, W, E) {
 }
 
 /** https://tc39.es/ecma262/#sec-newfunctionenvironment */
-export function NewFunctionEnvironment(F, newTarget) {
-  // 1. Assert: F is an ECMAScript function.
-  Assert(isECMAScriptFunctionObject(F));
-  // 2. Assert: Type(newTarget) is Undefined or Object.
-  Assert(newTarget instanceof UndefinedValue || newTarget instanceof ObjectValue);
-  // 3. Let env be a new function Environment Record containing no bindings.
+export function NewFunctionEnvironment(F: ECMAScriptFunctionObjectValue, newTarget: ObjectValue | UndefinedValue): FunctionEnvironmentRecord {
+  // 1. Let env be a new Function Environment Record containing no bindings.
   const env = new FunctionEnvironmentRecord();
-  // 4. Set env.[[FunctionObject]] to F.
+  // 2. Set env.[[FunctionObject]] to F.
   env.FunctionObject = F;
-  // 5. If F.[[ThisMode]] is lexical, set env.[[ThisBindingStatus]] to lexical.
+  // 3. If F.[[ThisMode]] is lexical, set env.[[ThisBindingStatus]] to lexical.
   if (F.ThisMode === 'lexical') {
     env.ThisBindingStatus = 'lexical';
-  } else { // 6. Else, set env.[[ThisBindingStatus]] to uninitialized.
+  } else { // 4. Else, set env.[[ThisBindingStatus]] to uninitialized.
     env.ThisBindingStatus = 'uninitialized';
   }
-  // 7. Set env.[[NewTarget]] to newTarget.
+  // 5. Set env.[[NewTarget]] to newTarget.
   env.NewTarget = newTarget;
-  // 8. Set env.[[OuterEnv]] to F.[[Environment]].
+  // 6. Set env.[[OuterEnv]] to F.[[Environment]].
   env.OuterEnv = F.Environment;
-  // 9. Return env.
+  // 7. Return env.
   return env;
 }
 
 /** https://tc39.es/ecma262/#sec-newglobalenvironment */
-export function NewGlobalEnvironment(G, thisValue) {
+export function NewGlobalEnvironment(G: ObjectValue, thisValue: ObjectValue): GlobalEnvironmentRecord {
   // 1. Let objRec be NewObjectEnvironment(G, false, null).
   const objRec = NewObjectEnvironment(G, Value.false, Value.null);
-  // 2. Let dclRec be a new declarative Environment Record containing no bindings.
-  const dclRec = new DeclarativeEnvironmentRecord(Value.null);
+  // 2. Let dclRec be NewDeclarativeEnvironment(null).
+  const dclRec = NewDeclarativeEnvironment(Value.null);
   // 3. Let env be a new global Environment Record.
   const env = new GlobalEnvironmentRecord();
   // 4. Set env.[[ObjectRecord]] to objRec.
@@ -956,8 +982,8 @@ export function NewGlobalEnvironment(G, thisValue) {
 }
 
 /** https://tc39.es/ecma262/#sec-newmoduleenvironment */
-export function NewModuleEnvironment(E) {
-  // 1. Let env be a new module Environment Record containing no bindings.
+export function NewModuleEnvironment(E: EnvironmentRecord | NullValue): ModuleEnvironmentRecord {
+  // 1. Let env be a new Module Environment Record containing no bindings.
   const env = new ModuleEnvironmentRecord();
   // 2. Set env.[[OuterEnv]] to E.
   env.OuterEnv = E;
@@ -965,15 +991,20 @@ export function NewModuleEnvironment(E) {
   return env;
 }
 
-class PrivateEnvironmentRecord {
-  OuterPrivateEnvironment;
-  Names;
-  constructor(init) {
-    this.OuterPrivateEnvironment = init.OuterPrivateEnvironment;
-    this.Names = init.Names;
+/** https://tc39.es/ecma262/#privateenvironment-record */
+export class PrivateEnvironmentRecord {
+  OuterPrivateEnvironment: PrivateEnvironmentRecord | NullValue;
+  Names: PrivateName[];
+
+  constructor({
+    OuterPrivateEnvironment,
+    Names,
+  }: Pick<PrivateEnvironmentRecord, 'OuterPrivateEnvironment' | 'Names'>) {
+    this.OuterPrivateEnvironment = OuterPrivateEnvironment;
+    this.Names = Names;
   }
 
-  mark(m) {
+  mark(m: GCMarker) {
     this.Names.forEach((name) => {
       m(name);
     });
@@ -981,9 +1012,9 @@ class PrivateEnvironmentRecord {
 }
 
 /** https://tc39.es/ecma262/#sec-newprivateenvironment */
-export function NewPrivateEnvironment(outerPrivEnv) {
+export function NewPrivateEnvironment(outerPrivEnv: PrivateEnvironmentRecord | NullValue): PrivateEnvironmentRecord {
   // 1. Let names be a new empty List.
-  const names = [];
+  const names: PrivateName[] = [];
   // 2. Return the PrivateEnvironment Record { [[OuterPrivateEnvironment]]: outerPrivEnv, [[Names]]: names }.
   return new PrivateEnvironmentRecord({
     OuterPrivateEnvironment: outerPrivEnv,

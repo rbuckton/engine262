@@ -7,7 +7,7 @@ import {
   ResolveBinding,
   InitializeReferencedBinding,
 } from '../abstract-ops/all.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation } from '../evaluator.mjs';
 import { StringValue, IsAnonymousFunctionDefinition } from '../static-semantics/all.mjs';
 import { Q } from '../completion.mjs';
 import {
@@ -23,7 +23,7 @@ export function* KeyedBindingInitialization(node, value, environment, propertyNa
     // 2. If Initializer is present and v is undefined, then
     if (node.Initializer && v === Value.undefined) {
       // a. Let defaultValue be the result of evaluating Initializer.
-      const defaultValue = yield* Evaluate(node.Initializer);
+      const defaultValue = yield* Evaluation(node.Initializer);
       // b. Set v to ? GetValue(defaultValue).
       v = Q(GetValue(defaultValue));
     }
@@ -43,7 +43,7 @@ export function* KeyedBindingInitialization(node, value, environment, propertyNa
         v = yield* NamedEvaluation(node.Initializer, bindingId);
       } else { // b. Else,
         // i. Let defaultValue be the result of evaluating Initializer.
-        const defaultValue = yield* Evaluate(node.Initializer);
+        const defaultValue = yield* Evaluation(node.Initializer);
         // ii. Set v to ? GetValue(defaultValue).
         v = Q(GetValue(defaultValue));
       }
@@ -53,6 +53,6 @@ export function* KeyedBindingInitialization(node, value, environment, propertyNa
       return Q(PutValue(lhs, v));
     }
     // 6. Return InitializeReferencedBinding(lhs, v).
-    return InitializeReferencedBinding(lhs, v);
+    return Q(InitializeReferencedBinding(lhs, v));
   }
 }

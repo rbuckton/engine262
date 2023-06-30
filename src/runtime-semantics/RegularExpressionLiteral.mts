@@ -2,6 +2,7 @@
 import { Value } from '../value.mjs';
 import { RegExpCreate } from '../abstract-ops/all.mjs';
 import { BodyText, FlagText } from '../static-semantics/all.mjs';
+import { C } from '../completion.mjs';
 
 /** https://tc39.es/ecma262/#sec-regular-expression-literals-runtime-semantics-evaluation */
 //   RegularExpressionLiteral :
@@ -12,5 +13,5 @@ export function Evaluate_RegularExpressionLiteral(RegularExpressionLiteral) {
   // 2. Let flags be ! UTF16Encode(FlagText of RegularExpressionLiteral).
   const flags = Value(FlagText(RegularExpressionLiteral));
   // 3. Return RegExpCreate(pattern, flags).
-  return RegExpCreate(pattern, flags);
+  return C(RegExpCreate(pattern, flags));
 }

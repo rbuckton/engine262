@@ -12,7 +12,7 @@ import { X } from '../completion.mjs';
 import { NewDeclarativeEnvironment } from '../environment.mjs';
 
 /** https://tc39.es/ecma262/#sec-runtime-semantics-instantiateasyncfunctionexpression */
-export function InstantiateAsyncFunctionExpression(AsyncFunctionExpression, name) {
+export function InstantiateAsyncFunctionExpression(AsyncFunctionExpression, name?) {
   const { BindingIdentifier, FormalParameters, AsyncBody } = AsyncFunctionExpression;
   if (BindingIdentifier) {
     // 1. Assert: name is not present.

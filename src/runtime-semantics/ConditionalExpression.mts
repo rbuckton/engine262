@@ -1,8 +1,8 @@
-// @ts-nocheck
 import { Value } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
 import { ToBoolean, GetValue } from '../abstract-ops/all.mjs';
-import { Q, X } from '../completion.mjs';
+import { C, Q } from '../completion.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-conditional-operator-runtime-semantics-evaluation */
 //   ConditionalExpression :
@@ -11,21 +11,21 @@ export function* Evaluate_ConditionalExpression({
   ShortCircuitExpression,
   AssignmentExpression_a,
   AssignmentExpression_b,
-}) {
-  // 1. Let lref be the result of evaluating ShortCircuitExpression.
-  const lref = yield* Evaluate(ShortCircuitExpression);
-  // 2. Let lval be ! ToBoolean(? GetValue(lref)).
-  const lval = X(ToBoolean(Q(GetValue(lref))));
+}: ParseNode.ConditionalExpression): ExpressionEvaluator {
+  // 1. Let lref be ? Evaluation of ShortCircuitExpression.
+  const lref = Q(yield* Evaluation(ShortCircuitExpression));
+  // 2. Let lval be ToBoolean(? GetValue(lref)).
+  const lval = ToBoolean(Q(GetValue(lref)));
   // 3. If lval is true, then
   if (lval === Value.true) {
-    // a. Let trueRef be the result of evaluating the first AssignmentExpression.
-    const trueRef = yield* Evaluate(AssignmentExpression_a);
+    // a. Let trueRef be ? Evaluation of the first AssignmentExpression.
+    const trueRef = Q(yield* Evaluation(AssignmentExpression_a));
     // b. Return ? GetValue(trueRef).
-    return Q(GetValue(trueRef));
+    return C(Q(GetValue(trueRef)));
   } else { // 4. Else,
-    // a. Let falseRef be the result of evaluating the second AssignmentExpression.
-    const falseRef = yield* Evaluate(AssignmentExpression_b);
+    // a. Let falseRef be ? Evaluation of the second AssignmentExpression.
+    const falseRef = Q(yield* Evaluation(AssignmentExpression_b));
     // b. Return ? GetValue(falseRef).
-    return Q(GetValue(falseRef));
+    return C(Q(GetValue(falseRef)));
   }
 }

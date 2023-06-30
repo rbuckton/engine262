@@ -9,7 +9,10 @@ import {
   NormalCompletion,
   Q,
   ReturnIfAbrupt,
+  ThrowCompletion,
   X,
+  type UnusedOrThrowCompletion,
+  C,
 } from '../completion.mjs';
 import { EnvironmentRecord } from '../environment.mjs';
 import {
@@ -56,7 +59,7 @@ export function IsPrivateReference(V) {
 }
 
 /** https://tc39.es/ecma262/#sec-getvalue */
-export function GetValue(V) {
+export function GetValue(V: ReferenceRecord | Value): NormalCompletion<Value> | ThrowCompletion {
   // 1. ReturnIfAbrupt(V).
   ReturnIfAbrupt(V);
   // 2. If V is not a Reference Record, return V.
@@ -89,7 +92,7 @@ export function GetValue(V) {
 }
 
 /** https://tc39.es/ecma262/#sec-putvalue */
-export function PutValue(V, W) {
+export function PutValue(V: ReferenceRecord | Value, W: Value): UnusedOrThrowCompletion {
   // 1. ReturnIfAbrupt(V).
   ReturnIfAbrupt(V);
   // 2. ReturnIfAbrupt(W).
@@ -137,7 +140,7 @@ export function PutValue(V, W) {
 }
 
 /** https://tc39.es/ecma262/#sec-getthisvalue */
-export function GetThisValue(V) {
+export function GetThisValue(V: ReferenceRecord): Value {
   // 1. Assert: IsPropertyReference(V) is true.
   Assert(IsPropertyReference(V) === Value.true);
   // 2. If IsSuperReference(V) is true, return V.[[ThisValue]]; otherwise return V.[[Base]].
@@ -149,7 +152,7 @@ export function GetThisValue(V) {
 }
 
 /** https://tc39.es/ecma262/#sec-initializereferencedbinding */
-export function InitializeReferencedBinding(V, W) {
+export function InitializeReferencedBinding(V: ReferenceRecord, W: Value): UnusedOrThrowCompletion {
   // 1. ReturnIfAbrupt(V).
   ReturnIfAbrupt(V);
   // 2. ReturnIfAbrupt(W).
@@ -162,8 +165,8 @@ export function InitializeReferencedBinding(V, W) {
   const base = V.Base;
   // 6. Assert: base is an Environment Record.
   Assert(base instanceof EnvironmentRecord);
-  // 7. Return base.InitializeBinding(V.[[ReferencedName]], W).
-  return base.InitializeBinding(V.ReferencedName, W);
+  // 7. Return ? base.InitializeBinding(V.[[ReferencedName]], W).
+  return C(Q(base.InitializeBinding(V.ReferencedName, W)));
 }
 
 /** https://tc39.es/ecma262/#sec-makeprivatereference */

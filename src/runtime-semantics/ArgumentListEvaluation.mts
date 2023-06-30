@@ -1,9 +1,8 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import { Value, Descriptor } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
-import { Q, X } from '../completion.mjs';
-import { OutOfRange } from '../helpers.mjs';
+import { Evaluation, type ListOrThrowEvaluator } from '../evaluator.mjs';
+import { C, Q, X } from '../completion.mjs';
+import { OutOfRange, isArray } from '../helpers.mjs';
 import {
   Assert,
   ArrayCreate,
@@ -16,9 +15,10 @@ import {
   F,
 } from '../abstract-ops/all.mjs';
 import { TemplateStrings } from '../static-semantics/all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
-/** https://tc39.es/ecma262/#sec-gettemplateobjec */
-function GetTemplateObject(templateLiteral) {
+/** https://tc39.es/ecma262/#sec-gettemplateobject */
+function GetTemplateObject(templateLiteral: ParseNode.TemplateLiteral) {
   // 1. Let realm be the current Realm Record.
   const realm = surroundingAgent.currentRealmRecord;
   // 2. Let templateRegistry be realm.[[TemplateMap]].
@@ -92,12 +92,12 @@ function GetTemplateObject(templateLiteral) {
 //
 // https://github.com/tc39/ecma262/pull/1402
 //   TemplateLiteral : SubstitutionTemplate
-function* ArgumentListEvaluation_TemplateLiteral(TemplateLiteral) {
+function* ArgumentListEvaluation_TemplateLiteral(TemplateLiteral: ParseNode.TemplateLiteral): ListOrThrowEvaluator<readonly Value[]> {
   switch (true) {
     case TemplateLiteral.TemplateSpanList.length === 1: {
       const templateLiteral = TemplateLiteral;
       const siteObj = GetTemplateObject(templateLiteral);
-      return [siteObj];
+      return C([siteObj]);
     }
 
     case TemplateLiteral.TemplateSpanList.length > 1: {
@@ -105,11 +105,11 @@ function* ArgumentListEvaluation_TemplateLiteral(TemplateLiteral) {
       const siteObj = GetTemplateObject(templateLiteral);
       const restSub = [];
       for (const Expression of TemplateLiteral.ExpressionList) {
-        const subRef = yield* Evaluate(Expression);
+        const subRef = Q(yield* Evaluation(Expression));
         const subValue = Q(GetValue(subRef));
         restSub.push(subValue);
       }
-      return [siteObj, ...restSub];
+      return C([siteObj, ...restSub]);
     }
 
     default:
@@ -129,13 +129,13 @@ function* ArgumentListEvaluation_TemplateLiteral(TemplateLiteral) {
 //   Arguments :
 //     `(` ArgumentList `)`
 //     `(` ArgumentList `,` `)`
-function* ArgumentListEvaluation_Arguments(Arguments) {
-  const precedingArgs = [];
+function* ArgumentListEvaluation_Arguments(Arguments: ParseNode.Arguments): ListOrThrowEvaluator<readonly Value[]> {
+  const precedingArgs: Value[] = [];
   for (const element of Arguments) {
-    if (element.type === 'AssignmentRestElement') {
+    if (element.type === 'SpreadElement') {
       const { AssignmentExpression } = element;
-      // 2. Let spreadRef be the result of evaluating AssignmentExpression.
-      const spreadRef = yield* Evaluate(AssignmentExpression);
+      // 2. Let spreadRef be ? Evaluation of AssignmentExpression.
+      const spreadRef = Q(yield* Evaluation(AssignmentExpression));
       // 3. Let spreadObj be ? GetValue(spreadRef).
       const spreadObj = Q(GetValue(spreadRef));
       // 4. Let iteratorRecord be ? GetIterator(spreadObj).
@@ -155,8 +155,8 @@ function* ArgumentListEvaluation_Arguments(Arguments) {
       }
     } else {
       const AssignmentExpression = element;
-      // 2. Let ref be the result of evaluating AssignmentExpression.
-      const ref = yield* Evaluate(AssignmentExpression);
+      // 2. Let ref be ? Evaluation of AssignmentExpression.
+      const ref = Q(yield* Evaluation(AssignmentExpression));
       // 3. Let arg be ? GetValue(ref).
       const arg = Q(GetValue(ref));
       // 4. Append arg to the end of precedingArgs.
@@ -164,16 +164,15 @@ function* ArgumentListEvaluation_Arguments(Arguments) {
       // 5. Return precedingArgs.
     }
   }
-  return precedingArgs;
+  return C(precedingArgs);
 }
 
-export function ArgumentListEvaluation(ArgumentsOrTemplateLiteral) {
-  switch (true) {
-    case Array.isArray(ArgumentsOrTemplateLiteral):
-      return ArgumentListEvaluation_Arguments(ArgumentsOrTemplateLiteral);
-    case ArgumentsOrTemplateLiteral.type === 'TemplateLiteral':
-      return ArgumentListEvaluation_TemplateLiteral(ArgumentsOrTemplateLiteral);
-    default:
-      throw new OutOfRange('ArgumentListEvaluation', ArgumentsOrTemplateLiteral);
+export function ArgumentListEvaluation(ArgumentsOrTemplateLiteral: ParseNode.Arguments | ParseNode.TemplateLiteral): ListOrThrowEvaluator<readonly Value[]> {
+  if (isArray(ArgumentsOrTemplateLiteral)) {
+    return ArgumentListEvaluation_Arguments(ArgumentsOrTemplateLiteral);
   }
+  if (ArgumentsOrTemplateLiteral.type === 'TemplateLiteral') {
+    return ArgumentListEvaluation_TemplateLiteral(ArgumentsOrTemplateLiteral);
+  }
+  throw new OutOfRange('ArgumentListEvaluation', ArgumentsOrTemplateLiteral);
 }

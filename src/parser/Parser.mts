@@ -1,4 +1,4 @@
-import { surroundingAgent } from '../engine.mjs';
+import { surroundingAgent, type FeatureFlag } from '../engine.mjs';
 import * as messages from '../messages.mjs';
 import { LanguageParser } from './LanguageParser.mjs';
 import { isLineTerminator, type Locatable } from './Lexer.mjs';
@@ -11,9 +11,15 @@ import type {
 import { Scope } from './Scope.mjs';
 import { Token } from './tokens.mjs';
 
+export interface ParserOptions {
+  source: string;
+  specifier?: string;
+  json?: boolean;
+}
+
 export class Parser extends LanguageParser {
   protected readonly source: string;
-  protected readonly specifier: string;
+  protected readonly specifier: string | undefined;
   readonly earlyErrors: Set<SyntaxError>;
   readonly state: {
     hasTopLevelAwait: boolean;
@@ -22,7 +28,7 @@ export class Parser extends LanguageParser {
   };
 
   protected readonly scope = new Scope(this);
-  constructor({ source, specifier, json = false }: { source: string, specifier: string, json?: boolean }) {
+  constructor({ source, specifier, json = false }: ParserOptions) {
     super();
     this.source = source;
     this.specifier = specifier;
@@ -38,7 +44,7 @@ export class Parser extends LanguageParser {
     return this.state.strict;
   }
 
-  feature(name: string) {
+  feature(name: FeatureFlag) {
     // eslint-disable-next-line @engine262/valid-feature
     return surroundingAgent.feature(name);
   }

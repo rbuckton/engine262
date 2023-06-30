@@ -12,7 +12,7 @@ import {
   IsAnonymousFunctionDefinition,
   IsComputedPropertyKey,
 } from '../static-semantics/all.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type UnusedOrThrowEvaluator } from '../evaluator.mjs';
 import {
   Q, X,
   ReturnIfAbrupt,
@@ -36,7 +36,7 @@ export function* PropertyDefinitionEvaluation_PropertyDefinitionList(PropertyDef
 //   `...` AssignmentExpression
 //   IdentifierReference
 //   PropertyName `:` AssignmentExpression
-function* PropertyDefinitionEvaluation_PropertyDefinition(PropertyDefinition, object, enumerable) {
+function* PropertyDefinitionEvaluation_PropertyDefinition(PropertyDefinition, object, enumerable): UnusedOrThrowEvaluator {
   switch (PropertyDefinition.type) {
     case 'IdentifierReference':
       return yield* PropertyDefinitionEvaluation_PropertyDefinition_IdentifierReference(PropertyDefinition, object, enumerable);
@@ -56,7 +56,7 @@ function* PropertyDefinitionEvaluation_PropertyDefinition(PropertyDefinition, ob
   const { PropertyName, AssignmentExpression } = PropertyDefinition;
   if (!PropertyName) {
     // 1. Let exprValue be the result of evaluating AssignmentExpression.
-    const exprValue = yield* Evaluate(AssignmentExpression);
+    const exprValue = yield* Evaluation(AssignmentExpression);
     // 2. Let fromValue be ? GetValue(exprValue).
     const fromValue = Q(GetValue(exprValue));
     // 3. Let excludedNames be a new empty List.
@@ -86,7 +86,7 @@ function* PropertyDefinitionEvaluation_PropertyDefinition(PropertyDefinition, ob
     propValue = yield* NamedEvaluation(AssignmentExpression, propKey);
   } else { // 6. Else,
     // a. Let exprValueRef be the result of evaluating AssignmentExpression.
-    const exprValueRef = yield* Evaluate(AssignmentExpression);
+    const exprValueRef = yield* Evaluation(AssignmentExpression);
     // b. Let propValue be ? GetValue(exprValueRef).
     propValue = Q(GetValue(exprValueRef));
   }
@@ -112,7 +112,7 @@ function* PropertyDefinitionEvaluation_PropertyDefinition_IdentifierReference(Id
   // 1. Let propName be StringValue of IdentifierReference.
   const propName = StringValue(IdentifierReference);
   // 2. Let exprValue be the result of evaluating IdentifierReference.
-  const exprValue = yield* Evaluate(IdentifierReference);
+  const exprValue = yield* Evaluation(IdentifierReference);
   // 3. Let propValue be ? GetValue(exprValue).
   const propValue = Q(GetValue(exprValue));
   // 4. Assert: enumerable is true.

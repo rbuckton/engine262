@@ -29,6 +29,8 @@ import {
   OrdinaryCreateFromConstructor,
   PromiseCapabilityRecord,
   PromiseResolve,
+  type OrdinaryObjectValue,
+  PromiseReactionRecord,
 } from '../abstract-ops/all.mjs';
 import {
   AbruptCompletion, Completion,
@@ -39,6 +41,15 @@ import {
   Q, X,
 } from '../completion.mjs';
 import { bootstrapConstructor } from './bootstrap.mjs';
+
+/** https://tc39.es/ecma262/#sec-properties-of-promise-instances */
+export type PromiseObjectValue = OrdinaryObjectValue<{
+  PromiseState: 'pending' | 'fulfilled' | 'rejected';
+  PromiseResult: Value;
+  PromiseFulfillReactions: PromiseReactionRecord[];
+  PromiseRejectReactions: PromiseReactionRecord[];
+  PromiseIsHandled: Boolean;
+}>;
 
 /** https://tc39.es/ecma262/#sec-promise-executor */
 function PromiseConstructor([executor = Value.undefined], { NewTarget }) {
@@ -670,11 +681,11 @@ export function bootstrapPromise(realmRec) {
     [wellKnownSymbols.species, [Promise_symbolSpecies]],
   ]);
 
-  promiseConstructor.DefineOwnProperty(Value('prototype'), Descriptor({
+  X(promiseConstructor.DefineOwnProperty(Value('prototype'), Descriptor({
     Writable: Value.false,
     Enumerable: Value.false,
     Configurable: Value.false,
-  }));
+  })));
 
   realmRec.Intrinsics['%Promise%'] = promiseConstructor;
 }

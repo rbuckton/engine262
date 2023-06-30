@@ -9,6 +9,7 @@ import {
   ObjectValue,
   UndefinedValue,
   Value,
+  BooleanValue,
 } from '../value.mjs';
 import { NormalCompletion, Q, X } from '../completion.mjs';
 import {
@@ -28,14 +29,43 @@ export function F(x) {
   return new NumberValue(x);
 }
 
+export { F as 𝔽 };
+
 // #ℤ
 export function Z(x) {
   Assert(typeof x === 'bigint');
   return new BigIntValue(x);
 }
 
+export { Z as ℤ };
+
+// #ℝ
+export function R(x: NumberValue): number;
+export function R(x: BigIntValue): bigint;
+export function R(x: BigIntValue | NumberValue) {
+  if (x instanceof NumberValue) return x.numberValue();
+  if (x instanceof BigIntValue) return x.bigintValue();
+  return x;
+}
+
+export { R as ℝ };
+
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export type FullyPopulatedAccessorDescriptor = Descriptor & {
+  Get: ObjectValue | UndefinedValue;
+  Set: ObjectValue | UndefinedValue;
+  Enumerable: BooleanValue;
+  Configurable: BooleanValue;
+};
+
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export type AccessorDescriptor =
+  | Descriptor & { Get: ObjectValue | UndefinedValue; Set: ObjectValue | UndefinedValue; }
+  | Descriptor & { Get: ObjectValue | UndefinedValue, Set?: ObjectValue | UndefinedValue; }
+  | Descriptor & { Get?: ObjectValue | UndefinedValue, Set: ObjectValue | UndefinedValue; };
+
 // 6.2.5.1 IsAccessorDescriptor
-export function IsAccessorDescriptor(Desc) {
+export function IsAccessorDescriptor(Desc: Descriptor | UndefinedValue): Desc is AccessorDescriptor {
   if (Desc instanceof UndefinedValue) {
     return false;
   }
@@ -47,8 +77,22 @@ export function IsAccessorDescriptor(Desc) {
   return true;
 }
 
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export type FullyPopulatedDataDescriptor = Descriptor & {
+  Value: Value;
+  Writable: BooleanValue;
+  Enumerable: BooleanValue;
+  Configurable: BooleanValue;
+};
+
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export type DataDescriptor =
+  | Descriptor & { Value: Value, Writable: BooleanValue | UndefinedValue }
+  | Descriptor & { Value: Value, Writable?: BooleanValue | UndefinedValue }
+  | Descriptor & { Value?: Value, Writable: BooleanValue | UndefinedValue };
+
 // 6.2.5.2 IsDataDescriptor
-export function IsDataDescriptor(Desc) {
+export function IsDataDescriptor(Desc: Descriptor | UndefinedValue): Desc is DataDescriptor {
   if (Desc instanceof UndefinedValue) {
     return false;
   }
@@ -60,14 +104,45 @@ export function IsDataDescriptor(Desc) {
   return true;
 }
 
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export type GenericDescriptor =
+  | Descriptor & { Get?: undefined; Set?: undefined; Value?: undefined; Writable?: undefined };
+
 // 6.2.5.3 IsGenericDescriptor
-export function IsGenericDescriptor(Desc) {
+export function IsGenericDescriptor(Desc: Descriptor | UndefinedValue): Desc is GenericDescriptor {
   if (Desc instanceof UndefinedValue) {
     return false;
   }
 
   if (!IsAccessorDescriptor(Desc) && !IsDataDescriptor(Desc)) {
     return true;
+  }
+
+  return false;
+}
+
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export type FullyPopulatedDescriptor =
+  | FullyPopulatedAccessorDescriptor
+  | FullyPopulatedDataDescriptor;
+
+/** https://tc39.es/ecma262/#sec-property-descriptor-specification-type */
+export function IsFullyPopulatedDescriptor(Desc: AccessorDescriptor): Desc is FullyPopulatedAccessorDescriptor;
+export function IsFullyPopulatedDescriptor(Desc: DataDescriptor): Desc is FullyPopulatedDataDescriptor;
+export function IsFullyPopulatedDescriptor(Desc: Descriptor): Desc is FullyPopulatedDescriptor;
+export function IsFullyPopulatedDescriptor(Desc: Descriptor): Desc is FullyPopulatedDescriptor {
+  if (IsAccessorDescriptor(Desc)) {
+    return Desc.Get !== undefined
+      && Desc.Set !== undefined
+      && Desc.Enumerable !== undefined
+      && Desc.Configurable !== undefined;
+  }
+
+  if (IsDataDescriptor(Desc)) {
+    return Desc.Value !== undefined
+      && Desc.Writable !== undefined
+      && Desc.Enumerable !== undefined
+      && Desc.Configurable !== undefined;
   }
 
   return false;

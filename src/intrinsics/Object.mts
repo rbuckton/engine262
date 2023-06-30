@@ -14,7 +14,7 @@ import {
   CreateDataProperty,
   DefinePropertyOrThrow,
   CreateDataPropertyOrThrow,
-  EnumerableOwnPropertyNames,
+  EnumerableOwnProperties,
   FromPropertyDescriptor,
   Get,
   HasOwnProperty,
@@ -168,7 +168,7 @@ function Object_entries([O = Value.undefined]) {
   // 1. Let obj be ? ToObject(O).
   const obj = Q(ToObject(O));
   // 2. Let nameList be ? EnumerableOwnPropertyNames(obj, key+value).
-  const nameList = Q(EnumerableOwnPropertyNames(obj, 'key+value'));
+  const nameList = Q(EnumerableOwnProperties(obj, 'key+value'));
   // 3. Return CreateArrayFromList(nameList).
   return CreateArrayFromList(nameList);
 }
@@ -337,7 +337,7 @@ function Object_keys([O = Value.undefined]) {
   // 1. Let obj be ? ToObject(O).
   const obj = Q(ToObject(O));
   // 2. Let nameList be ? EnumerableOwnPropertyNames(obj, key).
-  const nameList = Q(EnumerableOwnPropertyNames(obj, 'key'));
+  const nameList = Q(EnumerableOwnProperties(obj, 'key'));
   // 3. Return CreateArrayFromList(nameList).
   return CreateArrayFromList(nameList);
 }
@@ -401,7 +401,7 @@ function Object_values([O = Value.undefined]) {
   // 1. Let obj be ? ToObject(O).
   const obj = Q(ToObject(O));
   // 2. Let nameList be ? EnumerableOwnPropertyNames(obj, value).
-  const nameList = Q(EnumerableOwnPropertyNames(obj, 'value'));
+  const nameList = Q(EnumerableOwnProperties(obj, 'value'));
   // 3. Return CreateArrayFromList(nameList).
   return CreateArrayFromList(nameList);
 }

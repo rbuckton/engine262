@@ -17,12 +17,22 @@ import {
   ToUint32,
   Z,
   F,
+  type ArgumentList,
+  type NativeFunctionSteps,
+  type FullyPopulatedDescriptor,
+  type FullyPopulatedAccessorDescriptor,
+  type FullyPopulatedDataDescriptor,
+  type BasicObjectValue,
+  type BuiltinFunctionObjectValue,
+  type FunctionObjectValue,
 } from './abstract-ops/all.mjs';
 import { EnvironmentRecord } from './environment.mjs';
-import { Completion, X } from './completion.mjs';
+import { Completion, NormalCompletion, ThrowCompletion, type NormalOrThrowCompletion, Q, X, C } from './completion.mjs';
 import { ValueMap, OutOfRange, callable } from './helpers.mjs';
 import type { PrivateElementRecord } from './runtime-semantics/MethodDefinitionEvaluation.mjs';
+import type { ParseNode } from './parser/ParseNode.mjs';
 
+// TODO: Is the callable constructor necessary here? Can we make `Value` a discriminated union instead?
 
 // @ts-expect-error callable class
 export declare function Value(value: string): StringValue; // @ts-expect-error callable class
@@ -30,8 +40,8 @@ export declare function Value(value: number): NumberValue; // @ts-expect-error c
 export declare function Value(value: bigint): BigIntValue; // @ts-expect-error callable class
 export declare function Value(value: undefined): UndefinedValue; // @ts-expect-error callable class
 export declare function Value(value: null): NullValue; // @ts-expect-error callable class
-// TODO(ts): define a FunctionObjectValue type.
-export declare function Value(value: (...args: unknown[]) => unknown): ObjectValue; // @ts-expect-error callable class
+export declare function Value<T extends boolean>(value: T): BooleanValue<T>; // @ts-expect-error callable class
+export declare function Value(value: NativeFunctionSteps): BuiltinFunctionObjectValue; // @ts-expect-error callable class
 export declare function Value(value: string | number): StringValue | NumberValue;
 /** https://tc39.es/ecma262/#sec-ecmascript-language-types */
 export @callable((_target, _thisArg, [value]) => {
@@ -42,19 +52,21 @@ export @callable((_target, _thisArg, [value]) => {
     case 'undefined':
       return Value.undefined;
     case 'string':
-      return new StringValue(value);
+      return new StringValueImpl(value);
     case 'number':
       return new NumberValue(value);
     case 'bigint':
       return new BigIntValue(value);
+    case 'boolean':
+      return value ? Value.true : Value.false;
     case 'function':
-      return CreateBuiltinFunction(value, 0, Value(''), []);
+      return CreateBuiltinFunction(value as NativeFunctionSteps, 0, Value(''), []);
     default:
       throw new OutOfRange('new Value', value);
   }
 }) // @ts-expect-error callable class
 abstract class Value {
-  /** @deprecated Use Value() instead of Value() */
+  /** @deprecated Use Value() instead of new Value() */
   constructor(value?: never) {
     if (new.target !== Value) {
       return this;
@@ -62,25 +74,61 @@ abstract class Value {
     return Value(value);
   }
 
+  // Since the instance type of Value is essentially an empty interface, we use the following property to make the class
+  // check nominally rather than structurally to ensure that unexpected values aren't passed in place of an actual
+  // `Value` subtype.
+  declare private _value: never;
+
   static declare readonly null: NullValue;
   static declare readonly undefined: UndefinedValue;
-  static declare readonly true: BooleanValue;
-  static declare readonly false: BooleanValue;
+  static declare readonly true: BooleanValue<true>;
+  static declare readonly false: BooleanValue<false>;
+
+  isNull(): this is NullValue { return this instanceof NullValue; }
+  isUndefined(): this is NullValue { return this instanceof UndefinedValue; }
+  isString(): this is StringValue { return this instanceof StringValueImpl; }
+  isSymbol(): this is SymbolValue { return this instanceof SymbolValue; }
+  isNumber(): this is NumberValue { return this instanceof NumberValue; }
+  isBigInt(): this is BigIntValue { return this instanceof BigIntValue; }
+  isBoolean(): this is BooleanValue { return this instanceof BooleanValue; }
+  isObject(): this is ObjectValue { return this instanceof ObjectValue; }
+  isFunction(): this is FunctionObjectValue { return this.isObject() && 'Call' in this; }
+  isConstructor(): this is FunctionObjectValue { return this.isObject() && 'Construct' in this; }
 }
 
-export class PrimitiveValue extends Value { }
+export abstract class PrimitiveValue extends Value {
+  protected constructor() {
+    super();
+  }
+}
 export type PropertyKeyValue = StringValue | SymbolValue;
 
 /** https://tc39.es/ecma262/#sec-ecmascript-language-types-undefined-type */
-export class UndefinedValue extends PrimitiveValue { }
+export class UndefinedValue extends PrimitiveValue {
+  constructor() {
+    super();
+  }
+
+  // Since the instance type of UndefinedValue is essentially an empty interface, we use the following property to make
+  // the class check nominally rather than structurally.
+  declare private _undefined: never;
+}
 
 /** https://tc39.es/ecma262/#sec-ecmascript-language-types-null-type */
-export class NullValue extends PrimitiveValue { }
+export class NullValue extends PrimitiveValue {
+  constructor() {
+    super();
+  }
+
+  // Since the instance type of NullValue is essentially an empty interface, we use the following property to make
+  // the class check nominally rather than structurally.
+  declare private _null: never;
+}
 
 /** https://tc39.es/ecma262/#sec-ecmascript-language-types-boolean-type */
-export class BooleanValue extends PrimitiveValue {
-  readonly boolean: boolean;
-  constructor(v: boolean) {
+export class BooleanValue<T extends boolean = boolean> extends PrimitiveValue {
+  readonly boolean: T;
+  constructor(v: T) {
     super();
     this.boolean = v;
   }
@@ -102,7 +150,7 @@ Object.defineProperties(Value, {
 });
 
 /** https://tc39.es/ecma262/#sec-ecmascript-language-types-string-type */
-class StringValue extends PrimitiveValue {
+class StringValueImpl extends PrimitiveValue {
   readonly string: string;
   constructor(string: string) {
     super();
@@ -112,9 +160,45 @@ class StringValue extends PrimitiveValue {
   stringValue() {
     return this.string;
   }
+
+  static { Object.defineProperty(this, 'name', { value: 'StringValue' }); }
 }
-// rename for static semantics StringValue() conflict
-export { StringValue as JSStringValue };
+
+interface StringValueStatics {
+  (node: ParseNode): StringValue;
+  new (value: string): StringValue;
+  readonly prototype: StringValue;
+}
+
+export interface StringValue extends PrimitiveValue {
+  readonly string: string;
+  stringValue(): string;
+}
+
+/** https://tc39.es/ecma262/#sec-static-semantics-stringvalue */
+export const StringValue = function (node: string | ParseNode) {
+  if (new.target) {
+    Assert(typeof node === "string");
+    return new StringValueImpl(node);
+  }
+
+  Assert(typeof node !== "string");
+  switch (node.type) {
+    case 'IdentifierName':
+    case 'BindingIdentifier':
+    case 'IdentifierReference':
+    case 'LabelIdentifier':
+      return Value(node.name);
+    case 'PrivateIdentifier':
+      return Value(`#${node.name}`);
+    case 'StringLiteral':
+      return Value(node.value);
+    default:
+      throw new OutOfRange('StringValue', node);
+  }
+} as StringValueStatics;
+
+Object.defineProperties(StringValue, Object.getOwnPropertyDescriptors(StringValueImpl));
 
 /** https://tc39.es/ecma262/#sec-ecmascript-language-types-symbol-type */
 export class SymbolValue extends PrimitiveValue {
@@ -126,19 +210,19 @@ export class SymbolValue extends PrimitiveValue {
 }
 
 export const wellKnownSymbols = {
-  asyncIterator: new SymbolValue(new StringValue('Symbol.asyncIterator')),
-  hasInstance: new SymbolValue(new StringValue('Symbol.hasInstance')),
-  isConcatSpreadable: new SymbolValue(new StringValue('Symbol.isConcatSpreadable')),
-  iterator: new SymbolValue(new StringValue('Symbol.iterator')),
-  match: new SymbolValue(new StringValue('Symbol.match')),
-  matchAll: new SymbolValue(new StringValue('Symbol.matchAll')),
-  replace: new SymbolValue(new StringValue('Symbol.replace')),
-  search: new SymbolValue(new StringValue('Symbol.search')),
-  species: new SymbolValue(new StringValue('Symbol.species')),
-  split: new SymbolValue(new StringValue('Symbol.split')),
-  toPrimitive: new SymbolValue(new StringValue('Symbol.toPrimitive')),
-  toStringTag: new SymbolValue(new StringValue('Symbol.toStringTag')),
-  unscopables: new SymbolValue(new StringValue('Symbol.unscopables')),
+  asyncIterator: new SymbolValue(Value('Symbol.asyncIterator')),
+  hasInstance: new SymbolValue(Value('Symbol.hasInstance')),
+  isConcatSpreadable: new SymbolValue(Value('Symbol.isConcatSpreadable')),
+  iterator: new SymbolValue(Value('Symbol.iterator')),
+  match: new SymbolValue(Value('Symbol.match')),
+  matchAll: new SymbolValue(Value('Symbol.matchAll')),
+  replace: new SymbolValue(Value('Symbol.replace')),
+  search: new SymbolValue(Value('Symbol.search')),
+  species: new SymbolValue(Value('Symbol.species')),
+  split: new SymbolValue(Value('Symbol.split')),
+  toPrimitive: new SymbolValue(Value('Symbol.toPrimitive')),
+  toStringTag: new SymbolValue(Value('Symbol.toStringTag')),
+  unscopables: new SymbolValue(Value('Symbol.unscopables')),
 } as const;
 Object.setPrototypeOf(wellKnownSymbols, null);
 Object.freeze(wellKnownSymbols);
@@ -692,9 +776,19 @@ export class PrivateName extends Value {
   }
 }
 
+/** https://tc39.es/ecma262/#sec-makebasicobject, Step 3. */
+export type ObjectValueWithPrototypeSlot = BasicObjectValue<{
+  Prototype: ObjectValue | NullValue;
+}>;
+
+/** https://tc39.es/ecma262/#sec-makebasicobject, Step 4. */
+export type ObjectValueWithExtensibleSlot = BasicObjectValue<{
+  Extensible: BooleanValue;
+}>;
+
 /** https://tc39.es/ecma262/#sec-object-type */
 export class ObjectValue extends Value {
-  readonly properties: ValueMap<StringValue | SymbolValue, Descriptor>;
+  readonly properties: ValueMap<StringValue | SymbolValue, FullyPopulatedDescriptor>;
   readonly internalSlotsList: readonly string[];
   readonly PrivateElements: PrivateElementRecord[];
   constructor(internalSlotsList: readonly string[]) {
@@ -705,48 +799,58 @@ export class ObjectValue extends Value {
     this.internalSlotsList = internalSlotsList;
   }
 
-  GetPrototypeOf() {
-    return OrdinaryGetPrototypeOf(this);
+  GetPrototypeOf(): NormalOrThrowCompletion<ObjectValue | NullValue> {
+    // NOTE: Assumes an object that does not override [[GetPrototypeOf]] must have a [[Prototype]] internal slot, per
+    //       https://tc39.es/ecma262/#sec-makebasicobject, Step 3.
+    return C(OrdinaryGetPrototypeOf(this as ObjectValue as ObjectValueWithPrototypeSlot)); // NOTE: unsound cast
   }
 
-  SetPrototypeOf(V: Value) {
-    return OrdinarySetPrototypeOf(this, V);
+  SetPrototypeOf(V: ObjectValue | NullValue): NormalOrThrowCompletion<BooleanValue> {
+    // NOTE: Assumes an object that does not override [[SetPrototypeOf]] must have a [[Prototype]] internal slot, per
+    //       https://tc39.es/ecma262/#sec-makebasicobject, Step 3.
+    // NOTE: Assumes an object that does not override [[SetPrototypeOf]] must have an [[Extensible]] internal slot, per
+    //       https://tc39.es/ecma262/#sec-makebasicobject, Step 4.
+    return C(OrdinarySetPrototypeOf(this as ObjectValue as ObjectValueWithPrototypeSlot & ObjectValueWithExtensibleSlot, V)); // NOTE: unsound cast
   }
 
-  IsExtensible() {
-    return OrdinaryIsExtensible(this);
+  IsExtensible(): NormalOrThrowCompletion<BooleanValue> {
+    // NOTE: Assumes an object that does not override [[IsExtensible]] must have an [[Extensible]] internal slot, per
+    //       https://tc39.es/ecma262/#sec-makebasicobject, Step 4.
+    return C(OrdinaryIsExtensible(this as ObjectValue as ObjectValueWithExtensibleSlot)); // NOTE: unsound cast
   }
 
-  PreventExtensions() {
-    return OrdinaryPreventExtensions(this);
+  PreventExtensions(): NormalOrThrowCompletion<BooleanValue> {
+    // NOTE: Assumes an object that does not override [[PreventExtensions]] must have an [[Extensible]] internal slot, per
+    //       https://tc39.es/ecma262/#sec-makebasicobject, Step 4.
+    return C(OrdinaryPreventExtensions(this as ObjectValue as ObjectValueWithExtensibleSlot)); // NOTE: unsound cast
   }
 
-  GetOwnProperty(P: PropertyKeyValue) {
-    return OrdinaryGetOwnProperty(this, P);
+  GetOwnProperty(P: PropertyKeyValue): NormalOrThrowCompletion<FullyPopulatedDescriptor | UndefinedValue> {
+    return C(OrdinaryGetOwnProperty(this, P));
   }
 
-  DefineOwnProperty(P: PropertyKeyValue, Desc: Descriptor) {
-    return OrdinaryDefineOwnProperty(this, P, Desc);
+  DefineOwnProperty(P: PropertyKeyValue, Desc: Descriptor): NormalOrThrowCompletion<BooleanValue> {
+    return C(Q(OrdinaryDefineOwnProperty(this, P, Desc)));
   }
 
-  HasProperty(P: PropertyKeyValue) {
-    return OrdinaryHasProperty(this, P);
+  HasProperty(P: PropertyKeyValue): NormalOrThrowCompletion<BooleanValue> {
+    return C(Q(OrdinaryHasProperty(this, P)));
   }
 
-  Get(P: PropertyKeyValue, Receiver: Value) {
-    return OrdinaryGet(this, P, Receiver);
+  Get(P: PropertyKeyValue, Receiver: Value): NormalOrThrowCompletion<Value> {
+    return C(Q(OrdinaryGet(this, P, Receiver)));
   }
 
-  Set(P: PropertyKeyValue, V: Value, Receiver: Value) {
-    return OrdinarySet(this, P, V, Receiver);
+  Set(P: PropertyKeyValue, V: Value, Receiver: Value): NormalOrThrowCompletion<BooleanValue> {
+    return C(Q(OrdinarySet(this, P, V, Receiver)));
   }
 
-  Delete(P: PropertyKeyValue) {
-    return OrdinaryDelete(this, P);
+  Delete(P: PropertyKeyValue): NormalOrThrowCompletion<BooleanValue> {
+    return C(Q(OrdinaryDelete(this, P)));
   }
 
-  OwnPropertyKeys() {
-    return OrdinaryOwnPropertyKeys(this);
+  OwnPropertyKeys(): NormalOrThrowCompletion<PropertyKeyValue[]> {
+    return C(OrdinaryOwnPropertyKeys(this));
   }
 
   // NON-SPEC
@@ -759,11 +863,16 @@ export class ObjectValue extends Value {
   }
 }
 
+export interface ObjectValue {
+  Call?(thisArgument: Value, argumentList: ArgumentList): Value | NormalCompletion<Value> | ThrowCompletion;
+  Construct?(argumentList: ArgumentList, newTarget: ObjectValue): ObjectValue | NormalCompletion<ObjectValue> | ThrowCompletion;
+}
+
 export class ReferenceRecord {
-  Base: 'unresolvable' | Value;
+  Base: 'unresolvable' | Value | EnvironmentRecord;
   ReferencedName: StringValue | SymbolValue | PrivateName;
   Strict: BooleanValue;
-  ThisValue: ObjectValue | undefined;
+  ThisValue: Value | undefined;
   constructor({
     Base,
     ReferencedName,
@@ -785,16 +894,22 @@ export class ReferenceRecord {
 }
 
 // @ts-expect-error
+export function Descriptor(O: Pick<FullyPopulatedAccessorDescriptor, 'Configurable' | 'Enumerable' | 'Get' | 'Set'>): FullyPopulatedAccessorDescriptor // @ts-expect-error
+export function Descriptor(O: Pick<FullyPopulatedDataDescriptor, 'Configurable' | 'Enumerable' | 'Value' | 'Writable'>): FullyPopulatedDataDescriptor // @ts-expect-error
 export function Descriptor(O: Pick<Descriptor, 'Configurable' | 'Enumerable' | 'Get' | 'Set' | 'Value' | 'Writable'>): Descriptor // @ts-expect-error
 export @callable() class Descriptor {
-  readonly Value?: Value;
+  Value?: Value;
   // TODO(ts): should be FunctionObjectValue
-  readonly Get?: ObjectValue;
+  Get?: ObjectValue | UndefinedValue;
   // TODO(ts): should be FunctionObjectValue
-  readonly Set?: ObjectValue;
-  readonly Writable?: BooleanValue;
-  readonly Enumerable?: BooleanValue;
-  readonly Configurable?: BooleanValue;
+  Set?: ObjectValue | UndefinedValue;
+  Writable?: BooleanValue;
+  Enumerable?: BooleanValue;
+  Configurable?: BooleanValue;
+
+  // NOTE: ensure Descriptor is checked nominally
+  private declare _: never;
+
   constructor(O: Pick<Descriptor, 'Configurable' | 'Enumerable' | 'Get' | 'Set' | 'Value' | 'Writable'>) {
     this.Value = O.Value;
     this.Get = O.Get;
@@ -889,9 +1004,21 @@ export function Type(val: Value) {
 }
 
 // Used for Type(x)::y
-export function TypeForMethod(val: Value) {
+export type TypeForMethod<T extends Value> =
+  T extends UndefinedValue ? typeof UndefinedValue :
+  T extends NullValue ? typeof NullValue :
+  T extends BooleanValue ? typeof BooleanValue :
+  T extends StringValue ? typeof StringValue :
+  T extends SymbolValue ? typeof SymbolValue :
+  T extends NumberValue ? typeof NumberValue :
+  T extends BigIntValue ? typeof BigIntValue :
+  T extends PrivateName ? typeof PrivateName :
+  T extends ObjectValue ? typeof ObjectValue :
+  typeof Value;
+
+export function TypeForMethod<T extends Value>(val: T): TypeForMethod<T> {
   if (val instanceof Value) {
-    return val.constructor;
+    return val.constructor as unknown as TypeForMethod<T>; // NOTE: unsound cast
   }
   throw new OutOfRange('TypeForValue', val);
 }

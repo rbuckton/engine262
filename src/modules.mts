@@ -1,7 +1,6 @@
-// @ts-nocheck
-import { NewModuleEnvironment } from './environment.mjs';
-import { Value, JSStringValue } from './value.mjs';
-import { ExecutionContext, surroundingAgent } from './engine.mjs';
+import { ModuleEnvironmentRecord, NewModuleEnvironment } from './environment.mjs';
+import { Value, type StringValue, type ObjectValue } from './value.mjs';
+import { ExecutionContext, surroundingAgent, type GCMarker } from './engine.mjs';
 import {
   Assert,
   Call,
@@ -16,6 +15,7 @@ import {
   AsyncBlockStart,
   PromiseCapabilityRecord,
   GraphLoadingState,
+  Realm,
 } from './abstract-ops/all.mjs';
 import {
   VarScopedDeclarations,
@@ -29,66 +29,98 @@ import {
   NormalCompletion,
   AbruptCompletion,
   EnsureCompletion,
-  Q, X,
+  Q, X, ThrowCompletion,
 } from './completion.mjs';
-import { ValueSet, unwind } from './helpers.mjs';
-import { Evaluate } from './evaluator.mjs';
+import { ValueSet, kInternal, unwind } from './helpers.mjs';
+import { Evaluation } from './evaluator.mjs';
+import type { ParseNode } from './parser/ParseNode.mjs';
 
-// #resolvedbinding-record
+/** https://tc39.es/ecma262/#resolvedbinding-record */
 export class ResolvedBindingRecord {
-  Module;
-  BindingName;
-  constructor({ Module, BindingName }) {
-    Assert(Module instanceof AbstractModuleRecord);
-    Assert(BindingName === 'namespace' || BindingName instanceof JSStringValue);
+  Module: AbstractModuleRecord;
+  BindingName: StringValue | 'namespace';
+
+  constructor({
+    Module,
+    BindingName,
+  }: Pick<ResolvedBindingRecord, 'Module' | 'BindingName'>) {
     this.Module = Module;
     this.BindingName = BindingName;
   }
 
-  mark(m) {
+  mark(m: GCMarker) {
     m(this.Module);
   }
 }
 
+type AbstractModuleRecordInitKeys =
+  | 'Realm'
+  | 'Environment'
+  | 'Namespace'
+  | 'HostDefined';
+
+export interface ModuleRecordHostDefinedOptions {
+  specifier?: string;
+  public?: unknown;
+  [kInternal]?: { json?: string };
+}
+
 /** https://tc39.es/ecma262/#sec-abstract-module-records */
 export class AbstractModuleRecord {
-  Realm;
-  Environment;
-  Namespace;
-  HostDefined;
+  Realm: Realm;
+  Environment: ModuleEnvironmentRecord | undefined;
+  Namespace: ObjectValue | undefined;
+  HostDefined: ModuleRecordHostDefinedOptions | undefined;
+
   constructor({
     Realm,
     Environment,
     Namespace,
     HostDefined,
-  }) {
+  }: Pick<AbstractModuleRecord, AbstractModuleRecordInitKeys>) {
     this.Realm = Realm;
     this.Environment = Environment;
     this.Namespace = Namespace;
     this.HostDefined = HostDefined;
   }
 
-  mark(m) {
+  mark(m: GCMarker) {
     m(this.Realm);
     m(this.Environment);
     m(this.Namespace);
   }
 }
 
+type CyclicModuleRecordInitKeys =
+  | AbstractModuleRecordInitKeys
+  | 'Status'
+  | 'EvaluationError'
+  | 'DFSIndex'
+  | 'DFSAncestorIndex'
+  | 'RequestedModules'
+  | 'LoadedModules'
+  | 'Async'
+  | 'AsyncEvaluating'
+  | 'TopLevelCapability'
+  | 'AsyncParentModules'
+  | 'PendingAsyncDependencies';
+
 /** https://tc39.es/ecma262/#sec-cyclic-module-records */
 export class CyclicModuleRecord extends AbstractModuleRecord {
-  Status;
-  EvaluationError;
-  DFSIndex;
-  DFSAncestorIndex;
-  RequestedModules;
-  LoadedModules;
-  Async;
-  AsyncEvaluating;
-  TopLevelCapability;
-  AsyncParentModules;
-  PendingAsyncDependencies;
-  constructor(init) {
+  Status: 'new' | 'unlinked' | 'linking' | 'linked' | 'evaluating' | 'evaluating-async' | 'evaluated';
+  EvaluationError: ThrowCompletion | undefined;
+  DFSIndex: number | undefined;
+  DFSAncestorIndex: number | undefined;
+  RequestedModules: StringValue[];
+  LoadedModules: { Specifier: StringValue, Module: AbstractModuleRecord }[];
+  // TODO: Missing [[CycleRoot]]
+  Async: unknown; // TODO: Is this supposed to be [[HasTLA]]?
+  AsyncEvaluating: unknown; // TODO: Is this supposed to be [[AsyncEvaluation]]?
+  TopLevelCapability: PromiseCapabilityRecord | undefined;
+  AsyncParentModules: CyclicModuleRecord[];
+  PendingAsyncDependencies: number | undefined;
+
+  constructor(init: Pick<CyclicModuleRecord, CyclicModuleRecordInitKeys>) {
     super(init);
     this.Status = init.Status;
     this.EvaluationError = init.EvaluationError;
@@ -126,7 +158,7 @@ export class CyclicModuleRecord extends AbstractModuleRecord {
     // 1. Assert: module.[[Status]] is unlinked, linked, evaluating-async, or evaluated.
     Assert(module.Status === 'unlinked' || module.Status === 'linked' || module.Status === 'evaluating-async' || module.Status === 'evaluated');
     // 2. Let stack be a new empty List.
-    const stack = [];
+    const stack: CyclicModuleRecord[] = [];
     // 3. Let result be Completion(InnerModuleLinking(module, stack, 0)).
     const result = InnerModuleLinking(module, stack, 0);
     // 5. If result is an abrupt completion, then
@@ -162,21 +194,22 @@ export class CyclicModuleRecord extends AbstractModuleRecord {
     if (module.Status === 'evaluating-async' || module.Status === 'evaluated') {
       module = GetAsyncCycleRoot(module);
     }
-    // (*TopLevelAwait) 4. If module.[[TopLevelCapability]] is not undefined, then
-    if (module.TopLevelCapability !== Value.undefined) {
+    // (*TopLevelAwait) 4. If module.[[TopLevelCapability]] is not empty, then
+    if (module.TopLevelCapability !== undefined) {
       // a. Return module.[[TopLevelCapability]].[[Promise]].
       return module.TopLevelCapability.Promise;
     }
     // 4. Let stack be a new empty List.
-    const stack = [];
+    const stack: CyclicModuleRecord[] = [];
     // (*TopLevelAwait) 6. Let capability be ! NewPromiseCapability(%Promise%).
     const capability = X(NewPromiseCapability(surroundingAgent.intrinsic('%Promise%')));
     // (*TopLevelAwait) 7. Set module.[[TopLevelCapability]] to capability.
     module.TopLevelCapability = capability;
     // 5. Let result be InnerModuleEvaluation(module, stack, 0).
-    const result = InnerModuleEvaluation(module, stack, 0);
+    const result = EnsureCompletion(InnerModuleEvaluation(module, stack, 0));
     // 6. If result is an abrupt completion, then
     if (result instanceof AbruptCompletion) {
+      // SPEC-BUG: Spec says EvaluationError must be a Throw Completion, but only assumes Abrupt Completion here.
       // a. For each Cyclic Module Record m in stack, do
       for (const m of stack) {
         // i. Assert: m.[[Status]] is evaluating.
@@ -194,8 +227,8 @@ export class CyclicModuleRecord extends AbstractModuleRecord {
     } else { // (*TopLevelAwait) 10. Otherwise,
       // a. Assert: module.[[Status]] is evaluating-async or evaluated.
       Assert(module.Status === 'evaluating-async' || module.Status === 'evaluated');
-      // b. Assert: module.[[EvaluationError]] is undefined.
-      Assert(module.EvaluationError === Value.undefined);
+      // b. Assert: module.[[EvaluationError]] is empty.
+      Assert(module.EvaluationError === undefined);
       // c. If module.[[AsyncEvaluating]] is false, then
       if (module.AsyncEvaluating === Value.false) {
         // i. Perform ! Call(capability.[[Resolve]], undefined, «undefined»).
@@ -209,7 +242,7 @@ export class CyclicModuleRecord extends AbstractModuleRecord {
     return capability.Promise;
   }
 
-  mark(m) {
+  override mark(m: GCMarker) {
     super.mark(m);
     m(this.EvaluationError);
     for (const v of this.LoadedModules) {
@@ -218,16 +251,42 @@ export class CyclicModuleRecord extends AbstractModuleRecord {
   }
 }
 
+/** https://tc39.es/ecma262/#importentry-record */
+export interface ImportEntryRecord {
+  ModuleRequest: StringValue;
+  ImportName: StringValue | 'namespace-object';
+  LocalName: StringValue;
+}
+
+/** https://tc39.es/ecma262/#exportentry-record */
+export interface ExportEntryRecord {
+  ExportName: StringValue | null; // TODO: Should this be NullValue?
+  ModuleRequest: StringValue | null; // TODO: Should this be NullValue?
+  ImportName: StringValue | null | 'all' | 'all-but-default'; // TODO: Should this be NullValue?
+  LocalName: StringValue | null; // TODO: Should this be NullValue?
+}
+
+type SourceTextModuleRecordInitKeys =
+  | CyclicModuleRecordInitKeys
+  | 'ImportMeta'
+  | 'ECMAScriptCode'
+  | 'Context'
+  | 'ImportEntries'
+  | 'LocalExportEntries'
+  | 'IndirectExportEntries'
+  | 'StarExportEntries';
+
 /** https://tc39.es/ecma262/#sec-source-text-module-records */
 export class SourceTextModuleRecord extends CyclicModuleRecord {
-  ImportMeta;
-  ECMAScriptCode;
-  Context;
-  ImportEntries;
-  LocalExportEntries;
-  IndirectExportEntries;
-  StarExportEntries;
-  constructor(init) {
+  ECMAScriptCode: ParseNode.Module;
+  Context: ExecutionContext | undefined;
+  ImportMeta: ObjectValue | undefined;
+  ImportEntries: ImportEntryRecord[];
+  LocalExportEntries: ExportEntryRecord[];
+  IndirectExportEntries: ExportEntryRecord[];
+  StarExportEntries: ExportEntryRecord[];
+
+  constructor(init: Pick<SourceTextModuleRecord, SourceTextModuleRecordInitKeys>) {
     super(init);
 
     this.ImportMeta = init.ImportMeta;
@@ -239,8 +298,10 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     this.StarExportEntries = init.StarExportEntries;
   }
 
+  // NOTE: Missing https://tc39.es/ecma262/#sec-parsemodule
+
   /** https://tc39.es/ecma262/#sec-getexportednames */
-  GetExportedNames(exportStarSet) {
+  GetExportedNames(exportStarSet?: SourceTextModuleRecord[]) {
     const module = this;
     // 1. Assert: module.[[Status]] is not new.
     Assert(module.Status !== 'new');
@@ -293,7 +354,7 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
   }
 
   /** https://tc39.es/ecma262/#sec-resolveexport */
-  ResolveExport(exportName, resolveSet) {
+  ResolveExport(exportName: StringValue, resolveSet?: { Module: AbstractModuleRecord, ExportName: StringValue }[]): ResolvedBindingRecord | null | 'ambiguous' {
     const module = this;
     // 1. Assert: module.[[Status]] is not new.
     Assert(module.Status !== 'new');
@@ -307,7 +368,7 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
       if (module === r.Module && SameValue(exportName, r.ExportName) === Value.true) {
         // i. Assert: This is a circular import request.
         // ii. Return null.
-        return null;
+        return null; // TODO: Should this be `Value.null` instead?
       }
     }
     // 4. Append the Record { [[Module]]: module, [[ExportName]]: exportName } to resolveSet.
@@ -315,7 +376,11 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     // 5. For each ExportEntry Record e in module.[[LocalExportEntries]], do
     for (const e of module.LocalExportEntries) {
       // a. If SameValue(exportName, e.[[ExportName]]) is true, then
-      if (SameValue(exportName, e.ExportName) === Value.true) {
+      if (SameValue(exportName, e.ExportName!) === Value.true) { // NOTE: unsound non-null assertion
+        // SPEC-BUG?: https://tc39.es/ecma262/#exportentry-record says LocalName can be `null` but does not test for it,
+        //            and https://tc39.es/ecma262/#resolvedbinding-record does not indicate that `null` is permitted.
+        Assert(e.LocalName !== null);
+
         // i. Assert: module provides the direct binding for this export.
         // ii. Return ResolvedBinding Record { [[Module]]: module, [[BindingName]]: e.[[LocalName]] }.
         return new ResolvedBindingRecord({
@@ -327,7 +392,7 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     // 6. For each ExportEntry Record e in module.[[IndirectExportEntries]], do
     for (const e of module.IndirectExportEntries) {
       // a. If SameValue(exportName, e.[[ExportName]]) is true, then
-      if (SameValue(exportName, e.ExportName) === Value.true) {
+      if (SameValue(exportName, e.ExportName!) === Value.true) { // NOTE: unsound non-null assertion
         // i. Let importedModule be GetImportedModule(module, e.[[ModuleRequest]]).
         const importedModule = GetImportedModule(module, e.ModuleRequest);
         // ii. If e.[[ImportName]] is ~all~, then
@@ -374,6 +439,8 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
         } else { // c. Else,
           // 1. Assert: There is more than one * import that includes the requested name.
           // 2. If resolution.[[Module]] and starResolution.[[Module]] are not the same Module Record or SameValue(resolution.[[BindingName]], starResolution.[[BindingName]]) is false, return "ambiguous".
+          Assert(resolution.BindingName !== 'namespace'); // TODO: Verify this
+          Assert(starResolution.BindingName !== 'namespace'); // TODO: Verify this
           if (resolution.Module !== starResolution.Module || SameValue(resolution.BindingName, starResolution.BindingName) === Value.false) {
             return 'ambiguous';
           }
@@ -389,6 +456,9 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     const module = this;
     // 1. For each ExportEntry Record e in module.[[IndirectExportEntries]], do
     for (const e of module.IndirectExportEntries) {
+      // SPEC-BUG?: https://tc39.es/ecma262/#exportentry-record indicates that ExportName can be `null`
+      Assert(e.ExportName !== null);
+
       // a. Let resolution be module.ResolveExport(e.[[ExportName]]).
       const resolution = module.ResolveExport(e.ExportName);
       // b. If resolution is null or "ambiguous", throw a SyntaxError exception.
@@ -408,6 +478,7 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     // 3. Let realm be module.[[Realm]].
     const realm = module.Realm;
     // 4. Assert: realm is not undefined.
+    // @ts-expect-error (SPEC-BUG?: https://tc39.es/ecma262/#table-module-record-fields does not indicate that Realm can be `undefined`.)
     Assert(realm !== Value.undefined);
     // 5. Let env be NewModuleEnvironment(realm.[[GlobalEnv]]).
     const env = NewModuleEnvironment(realm.GlobalEnv);
@@ -423,8 +494,8 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
         const namespace = GetModuleNamespace(importedModule);
         // ii. Perform ! env.CreateImmutableBinding(in.[[LocalName]], true).
         X(env.CreateImmutableBinding(ie.LocalName, Value.true));
-        // iii. Call env.InitializeBinding(in.[[LocalName]], namespace).
-        env.InitializeBinding(ie.LocalName, namespace);
+        // iii. Perform ! env.InitializeBinding(in.[[LocalName]], namespace).
+        X(env.InitializeBinding(ie.LocalName, namespace));
       } else { // c. Else,
         // i. Let resolution be importedModule.ResolveExport(in.[[ImportName]]).
         const resolution = importedModule.ResolveExport(ie.ImportName);
@@ -444,8 +515,8 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
           const namespace = GetModuleNamespace(resolution.Module);
           // 2. Perform ! env.CreateImmutableBinding(in.[[LocalName]], true).
           X(env.CreateImmutableBinding(ie.LocalName, Value.true));
-          // 3. Call env.InitializeBinding(in.[[LocalName]], namespace).
-          env.InitializeBinding(ie.LocalName, namespace);
+          // 3. Perform ! env.InitializeBinding(in.[[LocalName]], namespace).
+          X(env.InitializeBinding(ie.LocalName, namespace));
         } else { // iv. Else,
           // 1. Call env.CreateImportBinding(in.[[LocalName]], resolution.[[Module]], resolution.[[BindingName]]).
           env.CreateImportBinding(ie.LocalName, resolution.Module, resolution.BindingName);
@@ -457,6 +528,7 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     // 9. Set the Function of moduleContext to null.
     moduleContext.Function = Value.null;
     // 10. Assert: module.[[Realm]] is not undefined.
+    // @ts-expect-error (SPEC-BUG?: https://tc39.es/ecma262/#table-module-record-fields does not indicate that Realm can be `undefined`.)
     Assert(module.Realm !== Value.undefined);
     // 11. Set the Realm of moduleContext to module.[[Realm]].
     moduleContext.Realm = module.Realm;
@@ -486,8 +558,8 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
         if (!declaredVarNames.has(dn)) {
           // 1. Perform ! env.CreateMutableBinding(dn, false).
           X(env.CreateMutableBinding(dn, Value.false));
-          // 2. Call env.InitializeBinding(dn, undefined).
-          env.InitializeBinding(dn, Value.undefined);
+          // 2. Perform ! env.InitializeBinding(dn, undefined).
+          X(env.InitializeBinding(dn, Value.undefined));
           // 3. Append dn to declaredVarNames.
           declaredVarNames.add(dn);
         }
@@ -514,8 +586,8 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
             || d.type === 'AsyncGeneratorDeclaration') {
           // 1. Let fo be InstantiateFunctionObject of d with argument env.
           const fo = InstantiateFunctionObject(d, env, Value.null);
-          // 2. Call env.InitializeBinding(dn, fo).
-          env.InitializeBinding(dn, fo);
+          // 2. Perform ! env.InitializeBinding(dn, fo).
+          X(env.InitializeBinding(dn, fo));
         }
       }
     }
@@ -526,18 +598,20 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
   }
 
   /** https://tc39.es/ecma262/#sec-source-text-module-record-execute-module */
-  ExecuteModule(capability) {
+  ExecuteModule(capability?: PromiseCapabilityRecord) {
+    // TODO(SPEC CONFORMANCE): Multiple steps missing or differ
     // 1. Let module be this Source Text Module Record.
     const module = this;
     // 2. Suspend the currently running execution context.
     // 3. Let moduleContext be module.[[Context]].
-    const moduleContext = module.Context;
+    // TODO: This is supposed to be created by ExecuteModule
+    const moduleContext = module.Context!; // TODO: unsound non-null assertion
     if (module.Async === Value.false) {
       Assert(capability === undefined);
       // 4. Push moduleContext onto the execution context stack; moduleContext is now the running execution context.
       surroundingAgent.executionContextStack.push(moduleContext);
       // 5. Let result be the result of evaluating module.[[ECMAScriptCode]].
-      const result = EnsureCompletion(unwind(Evaluate(module.ECMAScriptCode)));
+      const result = EnsureCompletion(unwind(Evaluation(module.ECMAScriptCode)));
       // 6. Suspend moduleContext and remove it from the execution context stack.
       // 7. Resume the context that is now on the top of the execution context stack as the running execution context.
       surroundingAgent.executionContextStack.pop(moduleContext);
@@ -553,33 +627,42 @@ export class SourceTextModuleRecord extends CyclicModuleRecord {
     }
   }
 
-  mark(m) {
+  override mark(m: GCMarker) {
     super.mark(m);
     m(this.ImportMeta);
     m(this.Context);
   }
 }
 
+type SyntheticModuleRecordInitKeys =
+  | AbstractModuleRecordInitKeys
+  | 'ExportNames'
+  | 'EvaluationSteps';
+
+// TODO: invalid documentation link. Where is spec? Is this for https://tc39.es/proposal-json-modules/#sec-synthetic-module-records, because it doesn't quite match?
 /** https://tc39.es/ecma262/#sec-synthetic-module-records */
 export class SyntheticModuleRecord extends AbstractModuleRecord {
-  ExportNames;
-  EvaluationSteps;
-  constructor(init) {
+  ExportNames: readonly StringValue[];
+  EvaluationSteps: (module: SyntheticModuleRecord) => Completion;
+
+  constructor(init: Pick<SyntheticModuleRecord, SyntheticModuleRecordInitKeys>) {
     super(init);
 
     this.ExportNames = init.ExportNames;
     this.EvaluationSteps = init.EvaluationSteps;
   }
 
+  // TODO: invalid documentation link. Where is spec?
   /** https://tc39.es/ecma262/#sec-synthetic-module-record-getexportednames */
-  GetExportedNames(_exportStarSet) {
+  GetExportedNames(_exportStarSet: unknown) {
     const module = this;
     // 1. Return module.[[ExportNames]].
     return module.ExportNames;
   }
 
+  // TODO: invalid documentation link. Where is spec?
   /** https://tc39.es/ecma262/#sec-synthetic-module-record-resolveexport */
-  ResolveExport(exportName, _resolveSet) {
+  ResolveExport(exportName: StringValue, _resolveSet: unknown) {
     const module = this;
     // 1. If module.[[ExportNames]] does not contain exportName, return null.
     // 2. Return ResolvedBinding Record { [[Module]]: module, [[BindingName]]: exportName }.
@@ -591,12 +674,14 @@ export class SyntheticModuleRecord extends AbstractModuleRecord {
     return null;
   }
 
+  // TODO: invalid documentation link. Where is spec?
   /** https://tc39.es/ecma262/#sec-synthetic-module-record-link */
   Link() {
     const module = this;
     // 1. Let realm be module.[[Realm]].
     const realm = module.Realm;
     // 2. Assert: realm is not undefined.
+    // @ts-expect-error (SPEC-BUG?: https://tc39.es/ecma262/#table-module-record-fields does not indicate that Realm can be `undefined`.)
     Assert(realm !== Value.undefined);
     // 3. Let env be NewModuleEnvironment(realm.[[GlobalEnv]]).
     const env = NewModuleEnvironment(realm.GlobalEnv);
@@ -613,6 +698,7 @@ export class SyntheticModuleRecord extends AbstractModuleRecord {
     return Value.undefined;
   }
 
+  // TODO: invalid documentation link. Where is spec?
   /** https://tc39.es/ecma262/#sec-synthetic-module-record-evaluate */
   Evaluate() {
     const module = this;
@@ -626,6 +712,7 @@ export class SyntheticModuleRecord extends AbstractModuleRecord {
     // 5. Set the ScriptOrModule of moduleContext to module.
     moduleContext.ScriptOrModule = module;
     // 6. Set the VariableEnvironment of moduleContext to module.[[Environment]].
+    Assert(!!module.Environment); // SPEC-BUG?: https://tc39.es/ecma262/#table-module-record-fields indicates Environment may be empty but this does not check.
     moduleContext.VariableEnvironment = module.Environment;
     // 7. Set the LexicalEnvironment of moduleContext to module.[[Environment]].
     moduleContext.LexicalEnvironment = module.Environment;
@@ -641,9 +728,11 @@ export class SyntheticModuleRecord extends AbstractModuleRecord {
     return Completion(result);
   }
 
+  // TODO: invalid documentation link. Where is spec?
   /** https://tc39.es/ecma262/#sec-synthetic-module-record-set-synthetic-export */
-  SetSyntheticExport(name, value) {
+  SetSyntheticExport(name: StringValue, value: Value) {
     const module = this;
+    Assert(!!module.Environment); // SPEC-BUG?: https://tc39.es/ecma262/#table-module-record-fields indicates Environment may be empty but this does not check.
     // 1. Return ? module.[[Environment]].SetMutableBinding(name, value, true).
     return Q(module.Environment.SetMutableBinding(name, value, Value.true));
   }

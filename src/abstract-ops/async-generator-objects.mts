@@ -8,8 +8,9 @@ import {
   NormalCompletion,
   AbruptCompletion,
   ThrowCompletion,
+  type ValueOrThrowCompletion,
 } from '../completion.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
 import { Value } from '../value.mjs';
 import { resume, handleInResume } from '../helpers.mjs';
 import {
@@ -59,7 +60,7 @@ export function AsyncGeneratorStart(generator, generatorBody) {
       // Note: Engine262 can only perform the "If generatorBody is an Abstract Closure" check:
       yield* typeof generatorBody === 'function'
         ? generatorBody()
-        : Evaluate(generatorBody),
+        : Evaluation(generatorBody),
     );
     // c. Assert: If we return here, the async generator either threw an exception or performed either an implicit or explicit return.
     // d. Remove genContext from the execution context stack and restore the execution context
@@ -204,7 +205,7 @@ function* AsyncGeneratorUnwrapYieldResumption(resumptionValue) {
 }
 
 /** https://tc39.es/ecma262/#sec-asyncgeneratoryield */
-export function* AsyncGeneratorYield(value) {
+export function* AsyncGeneratorYield(value): ExpressionEvaluator {
   // 1. Let genContext be the running execution context.
   const genContext = surroundingAgent.runningExecutionContext;
   // 2. Assert: genContext is the execution context of a generator.

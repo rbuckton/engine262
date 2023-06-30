@@ -1,6 +1,8 @@
-// @ts-nocheck
+import type { IteratorRecord } from './api.mjs';
+import type { AbruptCompletion, Completion, ExpressionCompletion, ListOrThrowCompletion, NormalCompletion, ReferenceOrThrowCompletion, ReferenceOrValueOrThrowCompletion, StatementCompletion, UnusedOrThrowCompletion } from './completion.mjs';
 import { surroundingAgent } from './engine.mjs';
 import { OutOfRange } from './helpers.mjs';
+import type { ParseNode } from './parser/ParseNode.mjs';
 import {
   Evaluate_Script,
   Evaluate_ScriptBody,
@@ -73,8 +75,65 @@ import {
   Evaluate_AnyFunctionBody,
   Evaluate_ExpressionBody,
 } from './runtime-semantics/all.mjs';
+import type { Value } from './value.mjs';
 
-export function* Evaluate(node) {
+export type Evaluator<TReturn = Completion, TNext = ExpressionCompletion> = Generator<Completion, TReturn, TNext | 'Unwind'>;
+
+export type UnusedOrThrowEvaluator = Evaluator<UnusedOrThrowCompletion>;
+export type ListOrThrowEvaluator<T extends readonly any[]> = Evaluator<ListOrThrowCompletion<T>>;
+
+export type IteratorRecordEvaluator = Evaluator<NormalCompletion<IteratorRecord> | AbruptCompletion<undefined>>;
+export type ExpressionEvaluator<T extends Value = Value> = Evaluator<ExpressionCompletion<T>>;
+export type ExpressionReferenceEvaluator<T extends Value = Value> = Evaluator<ReferenceOrValueOrThrowCompletion<T>>;
+export type ReferenceEvaluator = Evaluator<ReferenceOrThrowCompletion>;
+export type StatementEvaluator<T extends Value = Value> = Evaluator<StatementCompletion<T>>;
+
+interface EvaluatorOverrides {
+  'Script': StatementEvaluator;
+  'ScriptBody': StatementEvaluator;
+  'Module': StatementEvaluator;
+  'ModuleBody': StatementEvaluator;
+  'Block': StatementEvaluator;
+  'VariableStatement': StatementEvaluator;
+  'EmptyStatement': StatementEvaluator;
+  'IfStatement': StatementEvaluator;
+  'ExpressionStatement': StatementEvaluator;
+  'DoWhileStatement': StatementEvaluator;
+  'WhileStatement': StatementEvaluator;
+  'ForStatement': StatementEvaluator;
+  'ForInStatement': StatementEvaluator;
+  'ForOfStatement': StatementEvaluator;
+  'ForAwaitStatement': StatementEvaluator;
+  'SwitchStatement': StatementEvaluator;
+  'CaseClause': StatementEvaluator;
+  'DefaultClause': StatementEvaluator;
+  'BreakStatement': StatementEvaluator;
+  'ContinueStatement': StatementEvaluator;
+  'LabelledStatement': StatementEvaluator;
+  'ReturnStatement': StatementEvaluator;
+  'ThrowStatement': StatementEvaluator;
+  'TryStatement': StatementEvaluator;
+  'DebuggerStatement': StatementEvaluator;
+  'WithStatement': StatementEvaluator;
+  'ImportDeclaration': StatementEvaluator;
+  'ExportDeclaration': StatementEvaluator;
+  'ClassDeclaration': StatementEvaluator;
+  'LexicalDeclaration': StatementEvaluator;
+  'FunctionDeclaration': StatementEvaluator;
+  'GeneratorDeclaration': StatementEvaluator;
+  'AsyncFunctionDeclaration': StatementEvaluator;
+  'AsyncGeneratorDeclaration': StatementEvaluator;
+
+  'MemberExpression': ReferenceEvaluator;
+  'SuperProperty': ReferenceEvaluator;
+}
+
+type Evaluate<T extends ParseNode['type']> =
+  T extends keyof EvaluatorOverrides ? EvaluatorOverrides[T] :
+  ExpressionEvaluator;
+
+export function Evaluation<T extends ParseNode>(node: T): Evaluate<T['type']>;
+export function* Evaluation<T extends ParseNode>(node: T) {
   surroundingAgent.runningExecutionContext.callSite.setLocation(node);
 
   if (surroundingAgent.hostDefinedOptions.onNodeEvaluation) {

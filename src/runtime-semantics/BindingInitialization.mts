@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { JSStringValue, Value } from '../value.mjs';
+import { StringValue, UndefinedValue, Value } from '../value.mjs';
 import {
   Assert,
   PutValue,
@@ -16,15 +16,15 @@ import {
   PropertyBindingInitialization,
   RestBindingInitialization,
 } from './all.mjs';
+import type { EnvironmentRecord } from '../environment.mjs';
+import type { StatementEvaluator, UnusedOrThrowEvaluator } from '../evaluator.mjs';
 
 /** https://tc39.es/ecma262/#sec-initializeboundname */
-export function InitializeBoundName(name, value, environment) {
-  // 1. Assert: Type(name) is String.
-  Assert(name instanceof JSStringValue);
-  // 2. If environment is not undefined, then
+export function InitializeBoundName(name: StringValue, value: Value, environment: EnvironmentRecord | UndefinedValue) {
+  // 1. If environment is not undefined, then
   if (environment !== Value.undefined) {
-    // a. Perform environment.InitializeBinding(name, value).
-    environment.InitializeBinding(name, value);
+    // a. Perform ! environment.InitializeBinding(name, value).
+    X(environment.InitializeBinding(name, value));
     // b. Return NormalCompletion(undefined).
     return NormalCompletion(Value.undefined);
   } else {
@@ -50,7 +50,7 @@ function* BindingInitialization_ObjectBindingPattern({ BindingPropertyList, Bind
   return NormalCompletion(undefined);
 }
 
-export function* BindingInitialization(node, value, environment) {
+export function* BindingInitialization(node, value, environment): StatementEvaluator {
   switch (node.type) {
     case 'ForBinding':
       if (node.BindingIdentifier) {

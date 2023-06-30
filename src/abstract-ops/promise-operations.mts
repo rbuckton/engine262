@@ -27,16 +27,18 @@ import {
   SameValue,
   GetFunctionRealm,
   isFunctionObject,
+  type FunctionObjectValue,
 } from './all.mjs';
+import type { PromiseObjectValue } from '../intrinsics/Promise.mjs';
 
 // This file covers abstract operations defined in
 /** https://tc39.es/ecma262/#sec-promise-objects */
 
 /** https://tc39.es/ecma262/#sec-promisecapability-records */
 export class PromiseCapabilityRecord {
-  Promise;
-  Resolve;
-  Reject;
+  Promise: PromiseObjectValue;
+  Resolve: FunctionObjectValue;
+  Reject: FunctionObjectValue;
   constructor() {
     this.Promise = Value.undefined;
     this.Resolve = Value.undefined;

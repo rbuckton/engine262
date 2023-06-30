@@ -1,15 +1,17 @@
 // @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import {
+  BooleanValue,
   Descriptor,
+  NullValue,
   ObjectValue,
-  JSStringValue,
+  StringValue,
   Value,
   wellKnownSymbols,
 } from '../value.mjs';
-import { Q, X } from '../completion.mjs';
+import { Q, X, type NormalOrThrowCompletion } from '../completion.mjs';
 import {
-  AbstractRelationalComparison,
+  IsLessThan,
   Assert,
   Call,
   Construct,
@@ -35,6 +37,7 @@ import {
   isNonNegativeInteger,
   Yield,
   F,
+  type BasicObjectValue,
 } from './all.mjs';
 
 /** https://tc39.es/ecma262/#sec-array-exotic-objects-defineownproperty-p-desc */
@@ -42,7 +45,7 @@ function ArrayDefineOwnProperty(P, Desc) {
   const A = this;
 
   Assert(IsPropertyKey(P));
-  if (P instanceof JSStringValue && P.stringValue() === 'length') {
+  if (P instanceof StringValue && P.stringValue() === 'length') {
     return Q(ArraySetLength(A, Desc));
   } else if (isArrayIndex(P)) {
     const oldLenDesc = OrdinaryGetOwnProperty(A, Value('length'));
@@ -67,12 +70,24 @@ function ArrayDefineOwnProperty(P, Desc) {
   return OrdinaryDefineOwnProperty(A, P, Desc);
 }
 
-export function isArrayExoticObject(O) {
+export function isArrayExoticObject(O: ObjectValue): O is ArrayExoticObjectValue {
   return O.DefineOwnProperty === ArrayDefineOwnProperty;
 }
 
+declare const kArrayExoticObject: unique symbol;
+
+/** https://tc39.es/ecma262/#array-exotic-object */
+export type ArrayExoticObjectValue = 
+  & BasicObjectValue<{
+    Prototype: ObjectValue | NullValue;
+    Extensible: BooleanValue;
+  }>
+  & {
+    [kArrayExoticObject]: never;
+  };
+
 /** https://tc39.es/ecma262/#sec-arraycreate */
-export function ArrayCreate(length, proto) {
+export function ArrayCreate(length: number, proto?: ObjectValue | NullValue): NormalOrThrowCompletion<ArrayExoticObjectValue> {
   Assert(isNonNegativeInteger(length));
   if (Object.is(length, -0)) {
     length = +0;
@@ -232,13 +247,13 @@ export function SortCompare(x, y, comparefn) {
   // 6. Let yString be ? ToString(y).
   const yString = Q(ToString(y));
   // 7. Let xSmaller be the result of performing Abstract Relational Comparison xString < yString.
-  const xSmaller = AbstractRelationalComparison(xString, yString);
+  const xSmaller = Q(IsLessThan(xString, yString));
   // 8. If xSmaller is true, return -1𝔽.
   if (xSmaller === Value.true) {
     return F(-1);
   }
   // 9. Let ySmaller be the result of performing Abstract Relational Comparison yString < xString.
-  const ySmaller = AbstractRelationalComparison(yString, xString);
+  const ySmaller = Q(IsLessThan(yString, xString));
   // 10. If ySmaller is true, return 1𝔽.
   if (ySmaller === Value.true) {
     return F(1);

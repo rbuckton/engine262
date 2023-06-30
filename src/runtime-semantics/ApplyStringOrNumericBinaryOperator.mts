@@ -1,13 +1,14 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import {
-  Type, JSStringValue, TypeForMethod, Value,
+  Type, StringValue, TypeForMethod, Value, NumberValue, BigIntValue,
 } from '../value.mjs';
 import { ToNumeric, ToPrimitive, ToString } from '../abstract-ops/all.mjs';
-import { Q } from '../completion.mjs';
+import { C, NormalCompletion, Q, ThrowCompletion } from '../completion.mjs';
+
+export type StringOrNumericBinaryOperator = '**' | '*' | '/' | '%' | '+' | '-' | '<<' | '>>' | '>>>' | '&' | '^' | '|';
 
 /** https://tc39.es/ecma262/#sec-applystringornumericbinaryoperator */
-export function ApplyStringOrNumericBinaryOperator(lval, opText, rval) {
+export function ApplyStringOrNumericBinaryOperator(lval: Value, opText: StringOrNumericBinaryOperator, rval: Value): NormalCompletion<StringValue | NumberValue | BigIntValue> | ThrowCompletion {
   // 1. If opText is +, then
   if (opText === '+') {
     // a. Let lprim be ? ToPrimitive(lval).
@@ -15,13 +16,13 @@ export function ApplyStringOrNumericBinaryOperator(lval, opText, rval) {
     // b. Let rprim be ? ToPrimitive(rval).
     const rprim = Q(ToPrimitive(rval));
     // c. If Type(lprim) is String or Type(rprim) is String, then
-    if (lprim instanceof JSStringValue || rprim instanceof JSStringValue) {
+    if (lprim instanceof StringValue || rprim instanceof StringValue) {
       // i. Let lstr be ? ToString(lprim).
       const lstr = Q(ToString(lprim));
       // ii. Let rstr be ? ToString(rprim).
       const rstr = Q(ToString(rprim));
       // iii. Return the string-concatenation of lstr and rstr.
-      return Value(lstr.stringValue() + rstr.stringValue());
+      return C(Value(lstr.stringValue() + rstr.stringValue()));
     }
     // d. Set lval to lprim.
     lval = lprim;
@@ -35,7 +36,7 @@ export function ApplyStringOrNumericBinaryOperator(lval, opText, rval) {
   const rnum = Q(ToNumeric(rval));
   // 5. If Type(lnum) is different from Type(rnum), throw a TypeError exception.
   if (Type(lnum) !== Type(rnum)) {
-    return surroundingAgent.Throw('TypeError', 'CannotMixBigInts');
+    return C(surroundingAgent.Throw('TypeError', 'CannotMixBigInts'));
   }
   // 6. Let T be Type(lnum).
   const T = TypeForMethod(lnum);
@@ -55,5 +56,5 @@ export function ApplyStringOrNumericBinaryOperator(lval, opText, rval) {
     '|': T.bitwiseOR,
   }[opText];
   // 8. Return ? operation(lnum, rnum).
-  return Q(operation(lnum, rnum));
+  return C(Q(operation(lnum as NumberValue & BigIntValue, rnum as NumberValue & BigIntValue))); // NOTE: unsound casts
 }

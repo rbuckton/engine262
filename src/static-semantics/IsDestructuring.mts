@@ -1,5 +1,22 @@
-// @ts-nocheck
-export function IsDestructuring(node) {
+import type { ParseNode } from '../parser/ParseNode.mjs';
+
+type IsDestructuring =
+  | ParseNode.AssignmentPattern
+  | ParseNode.ObjectLiteral
+  | ParseNode.ArrayLiteral
+  | IsDestructuring_ForDeclaration
+  | IsDestructuring_ForBinding;
+
+type IsDestructuring_ForDeclaration = ParseNode.ForDeclaration & {
+  readonly ForBinding: IsDestructuring_ForBinding;
+}
+
+type IsDestructuring_ForBinding = ParseNode.ForBinding & {
+  readonly BindingPattern: ParseNode.BindingPattern;
+  readonly BindingIdentifier: undefined;
+}
+
+export function IsDestructuring(node: ParseNode | ParseNode.AssignmentPattern): node is IsDestructuring {
   switch (node.type) {
     case 'ObjectBindingPattern':
     case 'ArrayBindingPattern':

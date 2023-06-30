@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { HostGetImportMetaProperties, HostFinalizeImportMeta } from '../engine.mjs';
 import { ObjectValue, Value } from '../value.mjs';
 import {
@@ -7,12 +6,13 @@ import {
   OrdinaryObjectCreate,
   CreateDataPropertyOrThrow,
 } from '../abstract-ops/all.mjs';
-import { X } from '../completion.mjs';
+import { C, NormalCompletion, X } from '../completion.mjs';
 import { SourceTextModuleRecord } from '../modules.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-meta-properties */
 //   ImportMeta : `import` `.` `meta`
-export function Evaluate_ImportMeta(_ImportMeta) {
+export function Evaluate_ImportMeta(_ImportMeta: ParseNode.ImportMeta): NormalCompletion<ObjectValue> {
   // 1. Let module be ! GetActiveScriptOrModule().
   const module = X(GetActiveScriptOrModule());
   // 2. Assert: module is a Source Text Module Record.
@@ -35,11 +35,11 @@ export function Evaluate_ImportMeta(_ImportMeta) {
     // e. Set module.[[ImportMeta]] to importMeta.
     module.ImportMeta = importMeta;
     // f. Return importMeta.
-    return importMeta;
+    return C(importMeta);
   } else { // 5. Else,
     // a. Assert: Type(importMeta) is Object.
     Assert(importMeta instanceof ObjectValue);
     // b. Return importMeta.
-    return importMeta;
+    return C(importMeta);
   }
 }

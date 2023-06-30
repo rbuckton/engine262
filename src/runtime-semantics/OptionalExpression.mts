@@ -1,8 +1,7 @@
-// @ts-nocheck
-import { Value } from '../value.mjs';
+import { ReferenceRecord, Value } from '../value.mjs';
 import { GetValue, MakePrivateReference, RequireObjectCoercible } from '../abstract-ops/all.mjs';
-import { Evaluate } from '../evaluator.mjs';
-import { Q, X } from '../completion.mjs';
+import { Evaluation, type ExpressionReferenceEvaluator } from '../evaluator.mjs';
+import { C, Q, X } from '../completion.mjs';
 import { IsInTailPosition, StringValue } from '../static-semantics/all.mjs';
 import { OutOfRange } from '../helpers.mjs';
 import {
@@ -10,24 +9,25 @@ import {
   EvaluatePropertyAccessWithExpressionKey,
   EvaluatePropertyAccessWithIdentifierKey,
 } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-optional-chaining-evaluation */
 //   OptionalExpression :
 //     MemberExpression OptionalChain
 //     CallExpression OptionalChain
 //     OptionalExpression OptionalChain
-export function* Evaluate_OptionalExpression({ MemberExpression, OptionalChain }) {
-  // 1. Let baseReference be the result of evaluating MemberExpression.
-  const baseReference = yield* Evaluate(MemberExpression);
+export function* Evaluate_OptionalExpression({ MemberExpression, OptionalChain }: ParseNode.OptionalExpression): ExpressionReferenceEvaluator {
+  // 1. Let baseReference be ? Evaluation of MemberExpression.
+  const baseReference = Q(yield* Evaluation(MemberExpression));
   // 2. Let baseValue be ? GetValue(baseReference).
   const baseValue = Q(GetValue(baseReference));
   // 3. If baseValue is undefined or null, then
   if (baseValue === Value.undefined || baseValue === Value.null) {
     // a. Return undefined.
-    return Value.undefined;
+    return C(Value.undefined);
   }
-  // 4. Return the result of performing ChainEvaluation of OptionalChain with arguments baseValue and baseReference.
-  return yield* ChainEvaluation(OptionalChain, baseValue, baseReference);
+  // 4. Return ? ChainEvaluation of OptionalChain with arguments baseValue and baseReference.
+  return C(yield* ChainEvaluation(OptionalChain, baseValue, baseReference));
 }
 
 /** https://tc39.es/ecma262/#sec-optional-chaining-chain-evaluation */
@@ -40,7 +40,7 @@ export function* Evaluate_OptionalExpression({ MemberExpression, OptionalChain }
 //     OptionalChain `[` Expression `]`
 //     OptionalChain `.` IdentifierName
 //     OptionalChain `.` PrivateIdentifier
-function* ChainEvaluation(node, baseValue, baseReference) {
+function* ChainEvaluation(node: ParseNode.OptionalChain, baseValue: Value, baseReference: Value | ReferenceRecord): ExpressionReferenceEvaluator {
   const {
     OptionalChain,
     Arguments,
@@ -61,14 +61,14 @@ function* ChainEvaluation(node, baseValue, baseReference) {
       // 5. Let tailCall be IsInTailPosition(thisChain).
       const tailCall = IsInTailPosition(thisChain);
       // 6. Return ? EvaluateCall(newValue, newReference, Arguments, tailCall).
-      return Q(yield* EvaluateCall(newValue, newReference, Arguments, tailCall));
+      return C(Q(yield* EvaluateCall(newValue, newReference, Arguments, tailCall)));
     }
     // 1. Let thisChain be this OptionalChain.
     const thisChain = node;
     // 2. Let tailCall be IsInTailPosition(thisChain).
     const tailCall = IsInTailPosition(thisChain);
     // 3. Return ? EvaluateCall(baseValue, baseReference, Arguments, tailCall).
-    return Q(yield* EvaluateCall(baseValue, baseReference, Arguments, tailCall));
+    return C(Q(yield* EvaluateCall(baseValue, baseReference, Arguments, tailCall)));
   }
   if (Expression) {
     if (OptionalChain) {
@@ -81,12 +81,12 @@ function* ChainEvaluation(node, baseValue, baseReference) {
       // 4. If the code matched by this OptionalChain is strict mode code, let strict be true; else let strict be false.
       const strict = node.strict;
       // 5. Return ? EvaluatePropertyAccessWithExpressionKey(newValue, Expression, strict).
-      return Q(yield* EvaluatePropertyAccessWithExpressionKey(newValue, Expression, strict));
+      return C(Q(yield* EvaluatePropertyAccessWithExpressionKey(newValue, Expression, strict)));
     }
     // 1. If the code matched by this OptionalChain is strict mode code, let strict be true; else let strict be false.
     const strict = node.strict;
     // 2. Return ? EvaluatePropertyAccessWithExpressionKey(baseValue, Expression, strict).
-    return Q(yield* EvaluatePropertyAccessWithExpressionKey(baseValue, Expression, strict));
+    return C(Q(yield* EvaluatePropertyAccessWithExpressionKey(baseValue, Expression, strict)));
   }
   if (IdentifierName) {
     if (OptionalChain) {
@@ -99,12 +99,12 @@ function* ChainEvaluation(node, baseValue, baseReference) {
       // 4. If the code matched by this OptionalChain is strict mode code, let strict be true; else let strict be false.
       const strict = node.strict;
       // 5. Return ? EvaluatePropertyAccessWithIdentifierKey(newValue, IdentifierName, strict).
-      return Q(EvaluatePropertyAccessWithIdentifierKey(newValue, IdentifierName, strict));
+      return C(Q(EvaluatePropertyAccessWithIdentifierKey(newValue, IdentifierName, strict)));
     }
     // 1. If the code matched by this OptionalChain is strict mode code, let strict be true; else let strict be false.
     const strict = node.strict;
     // 2. Return ? EvaluatePropertyAccessWithIdentifierKey(baseValue, IdentifierName, strict).
-    return Q(EvaluatePropertyAccessWithIdentifierKey(baseValue, IdentifierName, strict));
+    return C(Q(EvaluatePropertyAccessWithIdentifierKey(baseValue, IdentifierName, strict)));
   }
   if (PrivateIdentifier) {
     if (OptionalChain) {
@@ -119,14 +119,14 @@ function* ChainEvaluation(node, baseValue, baseReference) {
       // 5. Let fieldNameString be the StringValue of PrivateIdentifier.
       const fieldNameString = StringValue(PrivateIdentifier);
       // 6. Return ! MakePrivateReference(nv, fieldNameString).
-      return X(MakePrivateReference(nv, fieldNameString));
+      return C(X(MakePrivateReference(nv, fieldNameString)));
     }
     // 1. Let bv be ? RequireObjectCoercible(baseValue).
     const bv = Q(RequireObjectCoercible(baseValue));
     // 2. Let fieldNameString be the StringValue of PrivateIdentifier.
     const fieldNameString = StringValue(PrivateIdentifier);
     // 3. Return ! MakePrivateReference(bv, fieldNameString).
-    return X(MakePrivateReference(bv, fieldNameString));
+    return C(X(MakePrivateReference(bv, fieldNameString)));
   }
   throw new OutOfRange('ChainEvaluation', node);
 }

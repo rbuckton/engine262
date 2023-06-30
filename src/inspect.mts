@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { surroundingAgent } from './engine.mjs';
 import {
-  Type, JSStringValue, ObjectValue, Value, wellKnownSymbols,
+  Type, StringValue, ObjectValue, Value, wellKnownSymbols,
 } from './value.mjs';
 import {
   Call, IsArray, Get, LengthOfArrayLike,
@@ -136,7 +136,7 @@ const INSPECTORS = {
     ctx.inspected.push(v);
 
     try {
-      const isArray = IsArray(v) === Value.true;
+      const isArray = X(IsArray(v)) === Value.true;
       const isTypedArray = 'TypedArrayName' in v;
       if (isArray || isTypedArray) {
         const length = X(LengthOfArrayLike(v));
@@ -171,7 +171,7 @@ const INSPECTORS = {
         const C = X(v.GetOwnProperty(key));
         if (C.Enumerable === Value.true) {
           cache.push([
-            key instanceof JSStringValue && bareKeyRe.test(key.stringValue()) ? key.stringValue() : i(key),
+            key instanceof StringValue && bareKeyRe.test(key.stringValue()) ? key.stringValue() : i(key),
             C.Value ? i(C.Value) : '<accessor>',
           ]);
         }
@@ -202,9 +202,9 @@ const INSPECTORS = {
   },
 };
 
-export function inspect(value) {
+export function inspect(value, realm = surroundingAgent.currentRealmRecord, _?: unknown) {
   const context = {
-    realm: surroundingAgent.currentRealmRecord,
+    realm,
     indent: 0,
     inspected: [],
   };

@@ -17,7 +17,7 @@ import { NewDeclarativeEnvironment } from '../environment.mjs';
 //   GeneratorExpression :
 //     `function` `*` `(` FormalParameters `)` `{` GeneratorBody `}`
 //     `function` `* `BindingIdentifier `(` FormalParameters `)` `{` GeneratorBody `}`
-export function InstantiateGeneratorFunctionExpression(GeneratorExpression, name) {
+export function InstantiateGeneratorFunctionExpression(GeneratorExpression, name?) {
   const { BindingIdentifier, FormalParameters, GeneratorBody } = GeneratorExpression;
   if (BindingIdentifier) {
     // 1. Assert: name is not present.
@@ -29,7 +29,7 @@ export function InstantiateGeneratorFunctionExpression(GeneratorExpression, name
     // 4. Let funcEnv be NewDeclarativeEnvironment(scope).
     const funcEnv = NewDeclarativeEnvironment(scope);
     // 5. Perform funcEnv.CreateImmutableBinding(name, false).
-    funcEnv.CreateImmutableBinding(name, Value.false);
+    X(funcEnv.CreateImmutableBinding(name, Value.false));
     // 6. Let privateScope be the running execution context's PrivateEnvironment.
     const privateScope = surroundingAgent.runningExecutionContext.PrivateEnvironment;
     // 7. Let sourceText be the source text matched by GeneratorExpression.
@@ -47,8 +47,8 @@ export function InstantiateGeneratorFunctionExpression(GeneratorExpression, name
       Enumerable: Value.false,
       Configurable: Value.false,
     }));
-    // 12. Perform funcEnv.InitializeBinding(name, closure).
-    funcEnv.InitializeBinding(name, closure);
+    // 12. Perform ! funcEnv.InitializeBinding(name, closure).
+    X(funcEnv.InitializeBinding(name, closure));
     // 13. Return closure.
     return closure;
   }

@@ -95,7 +95,7 @@ export abstract class ExpressionParser extends FunctionParser {
     if (left.type === 'CallExpression' && left.arrowInfo && this.test(Token.ARROW)
         && !this.peek().hadLineTerminatorBefore) {
       const last = left.Arguments[left.Arguments.length - 1];
-      if (!left.arrowInfo.hasTrailingComma || (last && last.type !== 'AssignmentRestElement')) {
+      if (!left.arrowInfo.hasTrailingComma || (last && last.type !== 'SpreadElement')) {
         assignmentInfo.clear();
         const node = this.startNode<ParseNode.AsyncArrowFunction>(left);
         return this.parseArrowFunction(node, left, FunctionKind.ASYNC);
@@ -903,10 +903,10 @@ export abstract class ExpressionParser extends FunctionParser {
     const Arguments: Mutable<ParseNode.Arguments> = [];
     let trailingComma = false;
     while (true) {
-      const node = this.startNode<ParseNode.AssignmentRestElement>();
+      const node = this.startNode<ParseNode.SpreadElement>();
       if (this.eat(Token.ELLIPSIS)) {
         node.AssignmentExpression = this.parseAssignmentExpression();
-        Arguments.push(this.finishNode(node, 'AssignmentRestElement'));
+        Arguments.push(this.finishNode(node, 'SpreadElement'));
       } else {
         Arguments.push(this.parseAssignmentExpression());
       }

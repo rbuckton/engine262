@@ -19,7 +19,7 @@ import {
   ReturnIfAbrupt,
   Q, X,
 } from '../completion.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation } from '../evaluator.mjs';
 import {
   StringValue,
   IsAnonymousFunctionDefinition,
@@ -107,7 +107,7 @@ function* IteratorBindingInitialization_SingleNameBinding({ BindingIdentifier, I
     if (IsAnonymousFunctionDefinition(Initializer)) {
       v = yield* NamedEvaluation(Initializer, bindingId);
     } else {
-      const defaultValue = yield* Evaluate(Initializer);
+      const defaultValue = yield* Evaluation(Initializer);
       v = Q(GetValue(defaultValue));
     }
   }
@@ -116,7 +116,7 @@ function* IteratorBindingInitialization_SingleNameBinding({ BindingIdentifier, I
     return Q(PutValue(lhs, v));
   }
   // 7. Return InitializeReferencedBinding(lhs, v).
-  return InitializeReferencedBinding(lhs, v);
+  return Q(InitializeReferencedBinding(lhs, v));
 }
 
 // BindingRestElement :
@@ -155,7 +155,7 @@ function* IteratorBindingInitialization_BindingRestElement({ BindingIdentifier, 
           return Q(PutValue(lhs, A));
         }
         // ii. Return InitializeReferencedBinding(lhs, A).
-        return InitializeReferencedBinding(lhs, A);
+        return Q(InitializeReferencedBinding(lhs, A));
       }
       // c. Let nextValue be IteratorValue(next).
       const nextValue = IteratorValue(next);
@@ -247,7 +247,7 @@ function* IteratorBindingInitialization_BindingPattern({ BindingPattern, Initial
   // 3. If Initializer is present and v is undefined, then
   if (Initializer && v === Value.undefined) {
     // a. Let defaultValue be the result of evaluating Initializer.
-    const defaultValue = yield* Evaluate(Initializer);
+    const defaultValue = yield* Evaluation(Initializer);
     // b. Set v to ? GetValue(defaultValue).
     v = Q(GetValue(defaultValue));
   }

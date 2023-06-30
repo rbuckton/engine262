@@ -3,7 +3,7 @@ import { surroundingAgent } from '../engine.mjs';
 import {
   UndefinedValue, NullValue, ObjectValue, Value,
 } from '../value.mjs';
-import { Q, X } from '../completion.mjs';
+import { NormalCompletion, Q, ThrowCompletion, X } from '../completion.mjs';
 import { ValueSet } from '../helpers.mjs';
 import {
   Assert,
@@ -25,6 +25,9 @@ import {
   IsCompatiblePropertyDescriptor,
   IsDataDescriptor,
   IsAccessorDescriptor,
+  type BasicObjectValue,
+  type ArgumentList,
+  type FunctionObjectValue,
 } from './all.mjs';
 
 /** https://tc39.es/ecma262/#sec-proxy-object-internal-methods-and-internal-slots-getprototypeof */
@@ -535,9 +538,24 @@ function ProxyConstruct(argumentsList, newTarget) {
   return newObj;
 }
 
-export function isProxyExoticObject(O) {
+export function isProxyExoticObject(O: ObjectValue): O is ProxyExoticObjectValue {
   return 'ProxyHandler' in O;
 }
+
+export type ProxyExoticObjectValue = BasicObjectValue<{
+  ProxyHandler: ObjectValue | NullValue;
+  ProxyTarget: ObjectValue;
+}>;
+
+export type ProxyFunctionExoticObjectValue = 
+  & BasicObjectValue<{
+    ProxyHandler: ObjectValue | NullValue;
+    ProxyTarget: FunctionObjectValue;
+  }>
+  & {
+    Call: (this: ProxyFunctionExoticObjectValue, thisArgument: Value, argumentList: ArgumentList) => Value | NormalCompletion<Value> | ThrowCompletion;
+    Construct?: (this: ProxyFunctionExoticObjectValue, argumentList: ArgumentList, newTarget: ObjectValue) => Value | NormalCompletion<Value> | ThrowCompletion;
+  };
 
 /** https://tc39.es/ecma262/#sec-proxycreate */
 export function ProxyCreate(target, handler) {
@@ -550,7 +568,7 @@ export function ProxyCreate(target, handler) {
     return surroundingAgent.Throw('TypeError', 'CannotCreateProxyWith', 'non-object', 'handler');
   }
   // 3. Let P be ! MakeBasicObject(« [[ProxyHandler]], [[ProxyTarget]] »).
-  const P = X(MakeBasicObject(['ProxyHandler', 'ProxyTarget']));
+  const P = X(MakeBasicObject(['ProxyHandler', 'ProxyTarget'])) as ProxyExoticObjectValue;
   // 4. Set P's essential internal methods, except for [[Call]] and [[Construct]], to the definitions specified in 9.5.
   P.GetPrototypeOf = ProxyGetPrototypeOf;
   P.SetPrototypeOf = ProxySetPrototypeOf;

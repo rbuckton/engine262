@@ -1,15 +1,16 @@
-// @ts-nocheck
 import { Value } from '../value.mjs';
 import { sourceTextMatchedBy } from '../abstract-ops/all.mjs';
-import { Q } from '../completion.mjs';
+import { C, Q } from '../completion.mjs';
 import { StringValue } from '../static-semantics/all.mjs';
 import { ClassDefinitionEvaluation } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
+import type { ExpressionEvaluator } from '../evaluator.mjs';
 
 /** https://tc39.es/ecma262/#sec-class-definitions-runtime-semantics-evaluation */
 // ClassExpression :
 //   `class` ClassTail
 //   `class` BindingIdentifier ClassTail
-export function* Evaluate_ClassExpression(ClassExpression) {
+export function* Evaluate_ClassExpression(ClassExpression: ParseNode.ClassExpression): ExpressionEvaluator {
   const { BindingIdentifier, ClassTail } = ClassExpression;
   if (!BindingIdentifier) {
     // 1. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments undefined and ''
@@ -17,7 +18,7 @@ export function* Evaluate_ClassExpression(ClassExpression) {
     // 2. Set value.[[SourceText]] to the source text matched by ClassExpression.
     value.SourceText = sourceTextMatchedBy(ClassExpression);
     // 3. Return value.
-    return value;
+    return C(value);
   }
   // 1. Let className be StringValue of BindingIdentifier.
   const className = StringValue(BindingIdentifier);
@@ -26,5 +27,5 @@ export function* Evaluate_ClassExpression(ClassExpression) {
   // Set value.[[SourceText]] to the source text matched by ClassExpression.
   value.SourceText = sourceTextMatchedBy(ClassExpression);
   // Return value.
-  return value;
+  return C(value);
 }

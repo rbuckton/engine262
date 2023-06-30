@@ -1,5 +1,4 @@
-// @ts-nocheck
-import { Value } from '../value.mjs';
+import { ObjectValue, Value } from '../value.mjs';
 import {
   Set,
   ArrayCreate,
@@ -11,8 +10,9 @@ import {
   CreateDataPropertyOrThrow,
   F,
 } from '../abstract-ops/all.mjs';
-import { Evaluate } from '../evaluator.mjs';
-import { ReturnIfAbrupt, Q, X } from '../completion.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
+import { ReturnIfAbrupt, Q, X, EnsureCompletion } from '../completion.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-runtime-semantics-arrayaccumulation */
 //  Elision :
@@ -25,7 +25,7 @@ import { ReturnIfAbrupt, Q, X } from '../completion.mjs';
 //    ElementList : ElementList `,` Elision SpreadElement
 //  SpreadElement :
 //    `...` AssignmentExpression
-function* ArrayAccumulation(ElementList, array, nextIndex) {
+function* ArrayAccumulation(ElementList: ParseNode.ElementList, array: ObjectValue, nextIndex: number) {
   let postIndex = nextIndex;
   for (const element of ElementList) {
     switch (element.type) {
@@ -45,9 +45,9 @@ function* ArrayAccumulation(ElementList, array, nextIndex) {
 }
 
 // SpreadElement : `...` AssignmentExpression
-function* ArrayAccumulation_SpreadElement({ AssignmentExpression }, array, nextIndex) {
-  // 1. Let spreadRef be the result of evaluating AssignmentExpression.
-  const spreadRef = yield* Evaluate(AssignmentExpression);
+function* ArrayAccumulation_SpreadElement({ AssignmentExpression }: ParseNode.SpreadElement, array: ObjectValue, nextIndex: number) {
+  // 1. Let spreadRef be ? Evaluation of AssignmentExpression.
+  const spreadRef = Q(yield* Evaluation(AssignmentExpression));
   // 2. Let spreadObj be ? GetValue(spreadRef).
   const spreadObj = Q(GetValue(spreadRef));
   // 3. Let iteratorRecord be ? GetIterator(spreadObj).
@@ -70,13 +70,13 @@ function* ArrayAccumulation_SpreadElement({ AssignmentExpression }, array, nextI
 }
 
 
-function* ArrayAccumulation_AssignmentExpression(AssignmentExpression, array, nextIndex) {
-  // 2. Let initResult be the result of evaluating AssignmentExpression.
-  const initResult = yield* Evaluate(AssignmentExpression);
+function* ArrayAccumulation_AssignmentExpression(AssignmentExpression: ParseNode.AssignmentExpressionOrHigher, array: ObjectValue, nextIndex: number) {
+  // 2. Let initResult be ? Evaluation of AssignmentExpression.
+  const initResult = Q(yield* Evaluation(AssignmentExpression));
   // 3. Let initValue be ? GetValue(initResult).
   const initValue = Q(GetValue(initResult));
   // 4. Let created be ! CreateDataPropertyOrThrow(array, ! ToString(𝔽(nextIndex)), initValue).
-  const _created = X(CreateDataPropertyOrThrow(array, X(ToString(F(nextIndex))), initValue));
+  X(CreateDataPropertyOrThrow(array, X(ToString(F(nextIndex))), initValue));
   // 5. Return nextIndex + 1.
   return nextIndex + 1;
 }
@@ -86,7 +86,7 @@ function* ArrayAccumulation_AssignmentExpression(AssignmentExpression, array, ne
 //    `[` Elision `]`
 //    `[` ElementList `]`
 //    `[` ElementList `,` Elision `]`
-export function* Evaluate_ArrayLiteral({ ElementList }) {
+export function* Evaluate_ArrayLiteral({ ElementList }: ParseNode.ArrayLiteral): ExpressionEvaluator {
   // 1. Let array be ! ArrayCreate(0).
   const array = X(ArrayCreate(0));
   // 2. Let len be the result of performing ArrayAccumulation for ElementList with arguments array and 0.
@@ -94,5 +94,5 @@ export function* Evaluate_ArrayLiteral({ ElementList }) {
   // 3. ReturnIfAbrupt(len).
   ReturnIfAbrupt(len);
   // 4. Return array.
-  return array;
+  return EnsureCompletion(array);
 }

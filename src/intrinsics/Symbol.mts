@@ -79,20 +79,20 @@ export function bootstrapSymbol(realmRec) {
   ]);
 
   for (const [name, sym] of Object.entries(wellKnownSymbols)) {
-    symbolConstructor.DefineOwnProperty(Value(name), Descriptor({
+    X(symbolConstructor.DefineOwnProperty(Value(name), Descriptor({
       Value: sym,
       Writable: Value.false,
       Enumerable: Value.false,
       Configurable: Value.false,
-    }));
+    })));
   }
 
-  symbolConstructor.DefineOwnProperty(Value('prototype'), Descriptor({
+  X(symbolConstructor.DefineOwnProperty(Value('prototype'), Descriptor({
     Value: realmRec.Intrinsics['%Symbol.prototype%'],
     Writable: Value.true,
     Enumerable: Value.false,
     Configurable: Value.true,
-  }));
+  })));
 
   realmRec.Intrinsics['%Symbol%'] = symbolConstructor;
 }

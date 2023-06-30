@@ -592,7 +592,7 @@ export function bootstrapArrayPrototype(realmRec) {
     (O) => Q(LengthOfArrayLike(O)),
   );
 
-  proto.DefineOwnProperty(wellKnownSymbols.iterator, proto.GetOwnProperty(Value('values')));
+  X(proto.DefineOwnProperty(wellKnownSymbols.iterator, X(proto.GetOwnProperty(Value('values')))));
 
   {
     const unscopableList = OrdinaryObjectCreate(Value.null);

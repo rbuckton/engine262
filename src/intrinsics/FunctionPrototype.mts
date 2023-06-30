@@ -20,15 +20,20 @@ import {
   ToIntegerOrInfinity,
   CreateBuiltinFunction,
   MakeBasicObject,
+  type BasicObjectValue,
+  type FunctionObjectValue,
+  type ArgumentList,
 } from '../abstract-ops/all.mjs';
 import {
-  JSStringValue,
+  StringValue,
   NumberValue,
   ObjectValue,
   Value,
   wellKnownSymbols,
+  NullValue,
+  BooleanValue,
 } from '../value.mjs';
-import { Q, X } from '../completion.mjs';
+import { NormalCompletion, Q, ThrowCompletion, X } from '../completion.mjs';
 import { assignProps } from './bootstrap.mjs';
 
 /** https://tc39.es/ecma262/#sec-properties-of-the-function-prototype-object */
@@ -82,6 +87,19 @@ function BoundFunctionExoticObjectConstruct(argumentsList, newTarget) {
   }
   return Q(Construct(target, args, newTarget));
 }
+
+export type BoundFunctionExoticObjectValue = 
+  & BasicObjectValue<{
+    BoundTargetFunction: FunctionObjectValue;
+    BoundThis: Value;
+    BoundArguments: unknown;
+    Prototype: ObjectValue | NullValue;
+    Extensible: BooleanValue;
+  }>
+  & {
+    Call: (this: BoundFunctionExoticObjectValue, thisArgument: Value, argumentList: ArgumentList) => Value | NormalCompletion<Value> | ThrowCompletion;
+    Construct?: (this: BoundFunctionExoticObjectValue, argumentList: ArgumentList, newTarget: ObjectValue) => Value | NormalCompletion<Value> | ThrowCompletion;
+  };
 
 /** https://tc39.es/ecma262/#sec-boundfunctioncreate */
 function BoundFunctionCreate(targetFunction, boundThis, boundArgs) {
@@ -160,7 +178,7 @@ function FunctionProto_bind([thisArg = Value.undefined, ...args], { thisValue })
   // 8. Let targetName be ? Get(Target, "name").
   let targetName = Q(Get(Target, Value('name')));
   // 9. If Type(targetName) is not String, set targetName to the empty String.
-  if (!(targetName instanceof JSStringValue)) {
+  if (!(targetName instanceof StringValue)) {
     targetName = Value('');
   }
   // 10. Perform SetFunctionName(F, targetName, "bound").

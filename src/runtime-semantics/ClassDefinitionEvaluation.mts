@@ -3,7 +3,7 @@ import { surroundingAgent } from '../engine.mjs';
 import {
   Value, NullValue, ObjectValue, PrivateName,
 } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
 import {
   Assert,
   Call,
@@ -21,6 +21,7 @@ import {
   PrivateMethodOrAccessorAdd,
   InitializeInstanceElements,
   DefineField,
+  type ECMAScriptFunctionObjectValue,
 } from '../abstract-ops/all.mjs';
 import {
   IsStatic,
@@ -66,7 +67,7 @@ function* ClassElementEvaluation(node, object, enumerable) {
 }
 
 // ClassTail : ClassHeritage? `{` ClassBody? `}`
-export function* ClassDefinitionEvaluation(ClassTail, classBinding, className) {
+export function* ClassDefinitionEvaluation(ClassTail, classBinding, className): ExpressionEvaluator<ECMAScriptFunctionObjectValue> {
   const { ClassHeritage, ClassBody } = ClassTail;
   // 1. Let env be the LexicalEnvironment of the running execution context.
   const env = surroundingAgent.runningExecutionContext.LexicalEnvironment;
@@ -74,8 +75,8 @@ export function* ClassDefinitionEvaluation(ClassTail, classBinding, className) {
   const classScope = NewDeclarativeEnvironment(env);
   // 3. If classBinding is not undefined, then
   if (classBinding !== Value.undefined) {
-    // a. Perform classScopeEnv.CreateImmutableBinding(classBinding, true).
-    classScope.CreateImmutableBinding(classBinding, Value.true);
+    // a. Perform ! classScopeEnv.CreateImmutableBinding(classBinding, true).
+    X(classScope.CreateImmutableBinding(classBinding, Value.true));
   }
   // 4. Let outerPrivateEnvironment be the running execution context's PrivateEnvironment.
   const outerPrivateEnvironment = surroundingAgent.runningExecutionContext.PrivateEnvironment;
@@ -109,7 +110,7 @@ export function* ClassDefinitionEvaluation(ClassTail, classBinding, className) {
     // a. Set the running execution context's LexicalEnvironment to classScope.
     surroundingAgent.runningExecutionContext.LexicalEnvironment = classScope;
     // b. Let superclassRef be the result of evaluating ClassHeritage.
-    const superclassRef = yield* Evaluate(ClassHeritage);
+    const superclassRef = yield* Evaluation(ClassHeritage);
     // c. Set the running execution context's LexicalEnvironment to env.
     surroundingAgent.runningExecutionContext.LexicalEnvironment = env;
     // d. Let superclass be ? GetValue(superclassRef).
@@ -295,8 +296,8 @@ export function* ClassDefinitionEvaluation(ClassTail, classBinding, className) {
   surroundingAgent.runningExecutionContext.LexicalEnvironment = env;
   // 27. If classBinding is not undefined, then
   if (classBinding !== Value.undefined) {
-    // a. Perform classScope.InitializeBinding(classBinding, F).
-    classScope.InitializeBinding(classBinding, F);
+    // a. Perform ! classScope.InitializeBinding(classBinding, F).
+    X(classScope.InitializeBinding(classBinding, F));
   }
   // 28. Set F.[[PrivateMethods]] to instancePrivateMethods.
   F.PrivateMethods = instancePrivateMethods;

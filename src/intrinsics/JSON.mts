@@ -5,7 +5,7 @@ import {
   NullValue,
   NumberValue,
   ObjectValue,
-  JSStringValue,
+  StringValue,
   UndefinedValue,
   Value,
 } from '../value.mjs';
@@ -14,7 +14,7 @@ import {
   Call,
   CreateDataProperty,
   CreateDataPropertyOrThrow,
-  EnumerableOwnPropertyNames,
+  EnumerableOwnProperties,
   Get,
   GetV,
   IsArray,
@@ -251,7 +251,7 @@ function InternalizeJSONProperty(holder, name, reviver) {
         I += 1;
       }
     } else {
-      const keys = Q(EnumerableOwnPropertyNames(val, 'key'));
+      const keys = Q(EnumerableOwnProperties(val, 'key'));
       for (const P of keys) {
         const newElement = Q(InternalizeJSONProperty(val, P, reviver));
         if (newElement instanceof UndefinedValue) {
@@ -281,7 +281,7 @@ function JSON_parse([text = Value.undefined, reviver = Value.undefined]) {
   // 5. Let unfiltered be completion.[[Value]].
   const unfiltered = completion.Value;
   // 6. Assert: unfiltered is either a String, Number, Boolean, Null, or an Object that is defined by either an ArrayLiteral or an ObjectLiteral.
-  Assert(unfiltered instanceof JSStringValue
+  Assert(unfiltered instanceof StringValue
          || unfiltered instanceof NumberValue
          || unfiltered instanceof BooleanValue
          || unfiltered instanceof NullValue
@@ -344,7 +344,7 @@ function SerializeJSONProperty(state, key, holder) {
   if (value === Value.false) {
     return Value('false');
   }
-  if (value instanceof JSStringValue) {
+  if (value instanceof StringValue) {
     return QuoteJSONString(value);
   }
   if (value instanceof NumberValue) {
@@ -401,7 +401,7 @@ function SerializeJSONObject(state, value) {
   if (state.PropertyList !== Value.undefined) {
     K = state.PropertyList;
   } else {
-    K = Q(EnumerableOwnPropertyNames(value, 'key'));
+    K = Q(EnumerableOwnProperties(value, 'key'));
   }
   const partial = [];
   for (const P of K) {
@@ -492,7 +492,7 @@ function JSON_stringify([value = Value.undefined, replacer = Value.undefined, sp
           const vStr = X(ToString(F(k)));
           const v = Q(Get(replacer, vStr));
           let item = Value.undefined;
-          if (v instanceof JSStringValue) {
+          if (v instanceof StringValue) {
             item = v;
           } else if (v instanceof NumberValue) {
             item = X(ToString(v));
@@ -524,7 +524,7 @@ function JSON_stringify([value = Value.undefined, replacer = Value.undefined, sp
     } else {
       gap = ' '.repeat(space);
     }
-  } else if (space instanceof JSStringValue) {
+  } else if (space instanceof StringValue) {
     if (space.stringValue().length <= 10) {
       gap = space.stringValue();
     } else {

@@ -226,7 +226,10 @@ export namespace ParseNode {
   }
 
   // SpreadElement :
-  // `...` AssignmentExpression
+  //   `...` AssignmentExpression
+  //
+  // ArgumentList (partial) :
+  //   `...` AssignmentExpression
   export interface SpreadElement extends BaseParseNode {
     readonly type: 'SpreadElement';
     readonly AssignmentExpression: AssignmentExpressionOrHigher;
@@ -494,7 +497,7 @@ export namespace ParseNode {
   // NON-SPEC
   export type ArgumentListElement =
     | AssignmentExpressionOrHigher
-    | AssignmentRestElement;
+    | SpreadElement;
 
   // OptionalExpression :
   //   MemberExpression OptionalChain
@@ -898,16 +901,98 @@ export namespace ParseNode {
   //   `*=`  `/=`  `%=`  `+=`  `-=`  `<<=`  `>>=`  `>>>=`  `&=`  `^=`  `|=`  `**=`
   export type AssignmentOperator = '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '>>>=' | '&=' | '^=' | '|=' | '**=';
 
+  // AssignmentPattern :
+  //   ObjectAssignmentPattern
+  //   ArrayAssignmentPattern
+  export type AssignmentPattern =
+    | ObjectAssignmentPattern
+    | ArrayAssignmentPattern;
+
+  // ObjectAssignmentPattern :
+  //   `{` `}`
+  //   `{` AssignmentRestProperty `}`
+  //   `{` AssignmentPropertyList `}`
+  //   `{` AssignmentPropertyList `,` AssignmentRestProperty `}`
+  export interface ObjectAssignmentPattern { // NOTE: not a BaseParseNode
+    readonly type: 'ObjectAssignmentPattern';
+    readonly AssignmentPropertyList: AssignmentPropertyList;
+    readonly AssignmentRestProperty: AssignmentRestProperty | undefined;
+  }
+
+  // AssignmentRestProperty :
+  //   `...` DestructuringAssignmentTarget
+  export interface AssignmentRestProperty { // NOTE: not a BaseParseNode
+    readonly type: 'AssignmentRestProperty';
+    readonly DestructuringAssignmentTarget: DestructuringAssignmentTarget;
+  }
+
+  // AssignmentPropertyList :
+  //   AssignmentProperty
+  //   AssignmentPropertyList `,` AssignmentProperty
+  export type AssignmentPropertyList = readonly AssignmentProperty[];
+
+  // AssignmentProperty :
+  //   IdentifierReference Initializer?
+  //   PropertyName : AssignmentElement
+  export interface AssignmentProperty { // NOTE: not a BaseParseNode
+    readonly type: 'AssignmentProperty';
+
+    // AssignmentProperty :
+    //   IdentifierReference Initializer?
+    // readonly IdentifierReference?: IdentifierReference;
+    // readonly Initializer?: Initializer;
+
+    // AssignmentProperty :
+    //   PropertyName : AssignmentElement
+    // readonly PropertyName?: PropertyName;
+    // readonly AssignmentElement?: AssignmentElement;
+
+    readonly IdentifierReference?: IdentifierReference;
+    readonly Initializer?: Initializer;
+    readonly PropertyName?: PropertyNameLike;
+    readonly AssignmentElement?: AssignmentElement;
+  }
+
+  // ArrayAssignmentPattern :
+  //   `[` Elision? AssignmentRestElement? `]`
+  //   `[` AssignmentElementList `]`
+  //   `[` AssignmentElementList `,` Elision? AssignmentRestElement? `]`
+  export interface ArrayAssignmentPattern { // NOTE: not a BaseParseNode
+    readonly type: 'ArrayAssignmentPattern';
+    readonly AssignmentElementList: AssignmentElementList;
+    readonly AssignmentRestElement: AssignmentRestElement | undefined;
+  }
+
+  // AssignmentElementList :
+  //   AssignmentElisionElement
+  //   AssignmentElementList `,` AssignmentElisionElement
+  export type AssignmentElementList = readonly AssignmentElisionElement[];
+
+  // AssignmentElisionElement :
+  //   Elision? AssignmentElement
+  export type AssignmentElisionElement =
+    | Elision
+    | AssignmentElement;
+
+  // AssignmentElement :
+  //  DestructuringAssignmentTarget Initializer?
+  export interface AssignmentElement { // NOTE: not a BaseParseNode
+    readonly type: 'AssignmentElement';
+    readonly DestructuringAssignmentTarget: DestructuringAssignmentTarget;
+    readonly Initializer: Initializer | null;
+  }
+
   // AssignmentRestElement :
   //   `...` DestructuringAssignmentTarget
-  //
-  // ArgumentList (partial) :
-  //   `...` AssignmentExpression
-  //   ArgumentList `,` `...` AssignmentExpression
-  export interface AssignmentRestElement extends BaseParseNode {
+  export interface AssignmentRestElement { // NOTE: not a BaseParseNode
     readonly type: 'AssignmentRestElement';
-    readonly AssignmentExpression: AssignmentExpressionOrHigher;
+    readonly DestructuringAssignmentTarget: DestructuringAssignmentTarget;
   }
+
+  // DestructuringAssignmentTarget :
+  //   LeftHandSideExpression
+  export type DestructuringAssignmentTarget =
+    | LeftHandSideExpression;
 
   // NON-SPEC
   export type BinaryExpressionOrHigher =
@@ -2250,7 +2335,6 @@ export type ParseNode =
   | ParseNode.TaggedTemplateExpression
   | ParseNode.OptionalExpression
   | ParseNode.OptionalChain
-  | ParseNode.AssignmentRestElement
   | ParseNode.UpdateExpression
   | ParseNode.AwaitExpression
   | ParseNode.UnaryExpression

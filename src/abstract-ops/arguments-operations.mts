@@ -1,15 +1,18 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import {
   Descriptor,
   Value,
   wellKnownSymbols,
+  type PropertyKeyValue,
+  ObjectValue,
+  UndefinedValue,
+  BooleanValue,
+  NullValue,
 } from '../value.mjs';
-import { BoundNames } from '../static-semantics/all.mjs';
-import { Q, X } from '../completion.mjs';
+import { BoundNames, StringValue } from '../static-semantics/all.mjs';
+import { C, NormalCompletion, Q, X, type ValueOrThrowCompletion, type BooleanOrThrowCompletion } from '../completion.mjs';
 import { ValueSet } from '../helpers.mjs';
 import {
-  Assert,
   CreateBuiltinFunction,
   CreateDataProperty,
   DefinePropertyOrThrow,
@@ -28,27 +31,36 @@ import {
   IsAccessorDescriptor,
   IsDataDescriptor,
   F,
+  type BasicObjectValue,
+  type OrdinaryObjectValue,
+  type ArgumentList,
+  type BuiltinFunctionObjectValue,
+  type NativeFunctionSteps,
+  type FullyPopulatedDescriptor,
 } from './all.mjs';
+import type { EnvironmentRecord } from '../environment.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 // This file covers abstract operations defined in
 /** https://tc39.es/ecma262/#sec-arguments-exotic-objects */
 
-
-function ArgumentsGetOwnProperty(P) {
+/** https://tc39.es/ecma262/#sec-arguments-exotic-objects-getownproperty-p */
+function ArgumentsGetOwnProperty(this: ArgumentsExoticObjectValue, P: PropertyKeyValue): NormalCompletion<FullyPopulatedDescriptor | UndefinedValue> {
   const args = this;
   const desc = OrdinaryGetOwnProperty(args, P);
-  if (desc === Value.undefined) {
-    return desc;
+  if (desc instanceof UndefinedValue) {
+    return C(desc);
   }
   const map = args.ParameterMap;
   const isMapped = X(HasOwnProperty(map, P));
   if (isMapped === Value.true) {
-    desc.Value = Get(map, P);
+    desc.Value = X(Get(map, P));
   }
-  return desc;
+  return C(desc);
 }
 
-function ArgumentsDefineOwnProperty(P, Desc) {
+/** https://tc39.es/ecma262/#sec-arguments-exotic-objects-defineownproperty-p-desc */
+function ArgumentsDefineOwnProperty(this: ArgumentsExoticObjectValue, P: PropertyKeyValue, Desc: Descriptor): NormalCompletion<BooleanValue> {
   const args = this;
   const map = args.ParameterMap;
   const isMapped = X(HasOwnProperty(map, P));
@@ -61,39 +73,40 @@ function ArgumentsDefineOwnProperty(P, Desc) {
   }
   const allowed = Q(OrdinaryDefineOwnProperty(args, P, newArgDesc));
   if (allowed === Value.false) {
-    return Value.false;
+    return C(Value.false);
   }
   if (isMapped === Value.true) {
     if (IsAccessorDescriptor(Desc) === true) {
-      map.Delete(P);
+      X(map.Delete(P));
     } else {
       if (Desc.Value !== undefined) {
-        const setStatus = Set(map, P, Desc.Value, Value.false);
-        Assert(setStatus === Value.true);
+        X(Set(map, P, Desc.Value, Value.false));
       }
       if (Desc.Writable !== undefined && Desc.Writable === Value.false) {
-        map.Delete(P);
+        X(map.Delete(P));
       }
     }
   }
-  return Value.true;
+  return C(Value.true);
 }
 
-function ArgumentsGet(P, Receiver) {
+/** https://tc39.es/ecma262/#sec-arguments-exotic-objects-get-p-receiver */
+function ArgumentsGet(this: ArgumentsExoticObjectValue, P: PropertyKeyValue, Receiver: Value): ValueOrThrowCompletion {
   const args = this;
   const map = args.ParameterMap;
   const isMapped = X(HasOwnProperty(map, P));
   if (isMapped === Value.false) {
-    return Q(OrdinaryGet(args, P, Receiver));
+    return C(Q(OrdinaryGet(args, P, Receiver)));
   } else {
-    return Get(map, P);
+    return C(X(Get(map, P)));
   }
 }
 
-function ArgumentsSet(P, V, Receiver) {
+/** https://tc39.es/ecma262/#sec-arguments-exotic-objects-set-p-v-receiver */
+function ArgumentsSet(this: ArgumentsExoticObjectValue, P: PropertyKeyValue, V: Value, Receiver: Value): BooleanOrThrowCompletion {
   const args = this;
   let isMapped;
-  let map;
+  let map: ObjectValue | undefined;
   if (SameValue(args, Receiver) === Value.false) {
     isMapped = false;
   } else {
@@ -101,34 +114,38 @@ function ArgumentsSet(P, V, Receiver) {
     isMapped = X(HasOwnProperty(map, P)) === Value.true;
   }
   if (isMapped) {
-    const setStatus = Set(map, P, V, Value.false);
-    Assert(setStatus === Value.true);
+    X(Set(map!, P, V, Value.false)); // NOTE: unsound non-null assertion
   }
-  return Q(OrdinarySet(args, P, V, Receiver));
+  return C(Q(OrdinarySet(args, P, V, Receiver)));
 }
 
-function ArgumentsDelete(P) {
+/** https://tc39.es/ecma262/#sec-arguments-exotic-objects-delete-p */
+function ArgumentsDelete(this: ArgumentsExoticObjectValue, P: PropertyKeyValue): BooleanOrThrowCompletion {
   const args = this;
   const map = args.ParameterMap;
   const isMapped = X(HasOwnProperty(map, P));
   const result = Q(OrdinaryDelete(args, P));
   if (result === Value.true && isMapped === Value.true) {
-    map.Delete(P);
+    X(map.Delete(P));
   }
-  return result;
+  return C(result);
 }
 
+export type OrdinaryArgumentsObjectValue = OrdinaryObjectValue<{
+  'ParameterMap': UndefinedValue;
+}>;
+
 /** https://tc39.es/ecma262/#sec-createunmappedargumentsobject */
-export function CreateUnmappedArgumentsObject(argumentsList) {
+export function CreateUnmappedArgumentsObject(argumentsList: ArgumentList): OrdinaryArgumentsObjectValue {
   const len = argumentsList.length;
-  const obj = OrdinaryObjectCreate(surroundingAgent.intrinsic('%Object.prototype%'), ['ParameterMap']);
+  const obj = OrdinaryObjectCreate(surroundingAgent.intrinsic('%Object.prototype%'), ['ParameterMap']) as OrdinaryArgumentsObjectValue;
   obj.ParameterMap = Value.undefined;
-  DefinePropertyOrThrow(obj, Value('length'), Descriptor({
+  X(DefinePropertyOrThrow(obj, Value('length'), Descriptor({
     Value: F(len),
     Writable: Value.true,
     Enumerable: Value.false,
     Configurable: Value.true,
-  }));
+  })));
   let index = 0;
   while (index < len) {
     const val = argumentsList[index];
@@ -151,22 +168,25 @@ export function CreateUnmappedArgumentsObject(argumentsList) {
 }
 
 /** https://tc39.es/ecma262/#sec-makearggetter */
-function MakeArgGetter(name, env) {
+function MakeArgGetter(name: StringValue, env: EnvironmentRecord): BuiltinFunctionObjectValue<Record<never, unknown>> {
   // 1. Let getterClosure be a new Abstract Closure with no parameters that captures name and env and performs the following steps when called:
   //   a. Return env.GetBindingValue(name, false).
-  const getterClosure = () => env.GetBindingValue(name, false);
+  const getterClosure: NativeFunctionSteps = () => env.GetBindingValue(name, Value.false);
   // 2. Let getter be ! CreateBuiltinFunction(getterClosure, 0, "", « »).
-  const getter = X(CreateBuiltinFunction(getterClosure, 0, Value(''), ['Name', 'Env']));
+  const getter = X(CreateBuiltinFunction(getterClosure, 0, Value(''), []));
   // 3. NOTE: getter is never directly accessible to ECMAScript code.
   // 4. Return getter.
   return getter;
 }
 
 /** https://tc39.es/ecma262/#sec-makeargsetter */
-function MakeArgSetter(name, env) {
+function MakeArgSetter(name: StringValue, env: EnvironmentRecord): BuiltinFunctionObjectValue<Record<never, unknown>> {
   // 1. Let setterClosure be a new Abstract Closure with parameters (value) that captures name and env and performs the following steps when called:
-  //   a. Return env.SetMutableBinding(name, value, false).
-  const setterClosure = ([value = Value.undefined]) => env.SetMutableBinding(name, value, false);
+  //   a. Return ! env.SetMutableBinding(name, value, false).
+  const setterClosure: NativeFunctionSteps = ([value = Value.undefined]) => {
+    X(env.SetMutableBinding(name, value, Value.false));
+    return C(Value.undefined);
+  };
   // 2. Let setter be ! CreateBuiltinFunction(setterClosure, 1, "", « »).
   const setter = X(CreateBuiltinFunction(setterClosure, 1, Value(''), ['Name', 'Env']));
   // 3. NOTE: setter is never directly accessible to ECMAScript code.
@@ -174,12 +194,18 @@ function MakeArgSetter(name, env) {
   return setter;
 }
 
+export type ArgumentsExoticObjectValue = BasicObjectValue<{
+  ParameterMap: ObjectValue;
+  Prototype: ObjectValue | NullValue;
+  Extensible: BooleanValue;
+}>;
+
 /** https://tc39.es/ecma262/#sec-createmappedargumentsobject */
-export function CreateMappedArgumentsObject(func, formals, argumentsList, env) {
+export function CreateMappedArgumentsObject(func: ObjectValue, formals: ParseNode.FormalParameters, argumentsList: ArgumentList, env: EnvironmentRecord): ArgumentsExoticObjectValue {
   // Assert: formals does not contain a rest parameter, any binding
   // patterns, or any initializers. It may contain duplicate identifiers.
   const len = argumentsList.length;
-  const obj = X(MakeBasicObject(['Prototype', 'Extensible', 'ParameterMap']));
+  const obj = X(MakeBasicObject(['Prototype', 'Extensible', 'ParameterMap'])) as ArgumentsExoticObjectValue;
   obj.GetOwnProperty = ArgumentsGetOwnProperty;
   obj.DefineOwnProperty = ArgumentsDefineOwnProperty;
   obj.Get = ArgumentsGet;

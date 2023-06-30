@@ -20,7 +20,6 @@ interface ArrowParameterConversions {
   'CoverInitializedName': ParseNode.SingleNameBinding;
   'PropertyDefinition': ParseNode.BindingRestProperty | ParseNode.BindingProperty;
   'SpreadElement': ParseNode.BindingRestElement;
-  'AssignmentRestElement': ParseNode.BindingRestElement;
 }
 
 type ConvertArrowParameterResult<T> =
@@ -242,8 +241,7 @@ export abstract class FunctionParser extends IdentifierParser {
         this.scope.declare(node, 'parameter');
         return BindingProperty;
       }
-      case 'SpreadElement':
-      case 'AssignmentRestElement': {
+      case 'SpreadElement': {
         const BindingRestElement = this.repurpose(node, 'BindingRestElement', (asNew, asOld, asPartial) => {
           const { AssignmentExpression } = asOld;
           if (AssignmentExpression.type === 'AssignmentExpression') {

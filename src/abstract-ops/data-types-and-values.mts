@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { JSStringValue, Value } from '../value.mjs';
+import { StringValue, Value, type PropertyKeyValue } from '../value.mjs';
 import { X } from '../completion.mjs';
 import { CanonicalNumericIndexString } from './all.mjs';
 
@@ -8,7 +8,7 @@ import { CanonicalNumericIndexString } from './all.mjs';
 
 // 6.1.7 #integer-index
 export function isIntegerIndex(V) {
-  if (!(V instanceof JSStringValue)) {
+  if (!(V instanceof StringValue)) {
     return false;
   }
   const numeric = X(CanonicalNumericIndexString(V));
@@ -22,8 +22,8 @@ export function isIntegerIndex(V) {
 }
 
 // 6.1.7 #array-index
-export function isArrayIndex(V) {
-  if (!(V instanceof JSStringValue)) {
+export function isArrayIndex(V: PropertyKeyValue): V is StringValue & { readonly string: `${number}` } {
+  if (!(V instanceof StringValue)) {
     return false;
   }
   const numeric = X(CanonicalNumericIndexString(V));
@@ -37,6 +37,10 @@ export function isArrayIndex(V) {
     return true;
   }
   return numeric.numberValue() > 0 && numeric.numberValue() < (2 ** 32) - 1;
+}
+
+export function inAscendingNumericIndexOrder(a: StringValue, b: StringValue) {
+  return Number.parseInt(a.stringValue(), 10) - Number.parseInt(b.stringValue(), 10);
 }
 
 export function isNonNegativeInteger(argument) {

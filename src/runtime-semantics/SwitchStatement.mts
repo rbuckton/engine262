@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation } from '../evaluator.mjs';
 import { NewDeclarativeEnvironment } from '../environment.mjs';
-import { Assert, GetValue, StrictEqualityComparison } from '../abstract-ops/all.mjs';
+import { Assert, GetValue, IsStrictlyEqual } from '../abstract-ops/all.mjs';
 import { Value } from '../value.mjs';
 import {
   Completion,
@@ -23,11 +23,11 @@ function* CaseClauseIsSelected(C, input) {
   // 1. Assert: C is an instance of the production  CaseClause : `case` Expression `:` StatementList?.
   Assert(C.type === 'CaseClause');
   // 2. Let exprRef be the result of evaluating the Expression of C.
-  const exprRef = yield* Evaluate(C.Expression);
+  const exprRef = yield* Evaluation(C.Expression);
   // 3. Let clauseSelector be ? GetValue(exprRef).
   const clauseSelector = Q(GetValue(exprRef));
   // 4. Return the result of performing Strict Equality Comparison input === clauseSelector.
-  return StrictEqualityComparison(input, clauseSelector);
+  return IsStrictlyEqual(input, clauseSelector);
 }
 
 /** https://tc39.es/ecma262/#sec-runtime-semantics-caseblockevaluation */
@@ -58,7 +58,7 @@ function* CaseBlockEvaluation({ CaseClauses_a, DefaultClause, CaseClauses_b }, i
         // b. If found is true, them
         if (found === Value.true) {
           // i. Let R be the result of evaluating C.
-          const R = EnsureCompletion(yield* Evaluate(C));
+          const R = EnsureCompletion(yield* Evaluation(C));
           // ii. If R.[[Value]] is not empty, set V to R.[[Value]].
           if (R.Value !== undefined) {
             V = R.Value;
@@ -95,7 +95,7 @@ function* CaseBlockEvaluation({ CaseClauses_a, DefaultClause, CaseClauses_b }, i
         // b. If found is true, them
         if (found === Value.true) {
           // i. Let R be the result of evaluating C.
-          const R = EnsureCompletion(yield* Evaluate(C));
+          const R = EnsureCompletion(yield* Evaluation(C));
           // ii. If R.[[Value]] is not empty, set V to R.[[Value]].
           if (R.Value !== undefined) {
             V = R.Value;
@@ -129,7 +129,7 @@ function* CaseBlockEvaluation({ CaseClauses_a, DefaultClause, CaseClauses_b }, i
           // b. If foundInB is true, them
           if (foundInB === Value.true) {
             // i. Let R be the result of evaluating C.
-            const R = EnsureCompletion(yield* Evaluate(C));
+            const R = EnsureCompletion(yield* Evaluation(C));
             // ii. If R.[[Value]] is not empty, set V to R.[[Value]].
             if (R.Value !== undefined) {
               V = R.Value;
@@ -146,7 +146,7 @@ function* CaseBlockEvaluation({ CaseClauses_a, DefaultClause, CaseClauses_b }, i
         return NormalCompletion(V);
       }
       // 11. Let R be the result of evaluating DefaultClause.
-      const R = EnsureCompletion(yield* Evaluate(DefaultClause));
+      const R = EnsureCompletion(yield* Evaluation(DefaultClause));
       // 12. If R.[[Value]] is not empty, set V to R.[[Value]].
       if (R.Value !== undefined) {
         V = R.Value;
@@ -159,7 +159,7 @@ function* CaseBlockEvaluation({ CaseClauses_a, DefaultClause, CaseClauses_b }, i
       // 15. For each CaseClause C in B, do
       for (const C of B) {
         // a. Let R be the result of evaluating CaseClause C.
-        const innerR = EnsureCompletion(yield* Evaluate(C));
+        const innerR = EnsureCompletion(yield* Evaluation(C));
         // b. If R.[[Value]] is not empty, set V to R.[[Value]].
         if (innerR.Value !== undefined) {
           V = innerR.Value;
@@ -183,7 +183,7 @@ function* CaseBlockEvaluation({ CaseClauses_a, DefaultClause, CaseClauses_b }, i
 //     `switch` `(` Expression `)` CaseBlock
 export function* Evaluate_SwitchStatement({ Expression, CaseBlock }) {
   // 1. Let exprRef be the result of evaluating Expression.
-  const exprRef = yield* Evaluate(Expression);
+  const exprRef = yield* Evaluation(Expression);
   // 2. Let switchValue be ? GetValue(exprRef).
   const switchValue = Q(GetValue(exprRef));
   // 3. Let oldEnv be the running execution context's LexicalEnvironment.

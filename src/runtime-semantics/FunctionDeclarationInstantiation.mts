@@ -24,9 +24,10 @@ import {
   InstantiateFunctionObject,
   IteratorBindingInitialization_FormalParameters,
 } from './all.mjs';
+import type { UnusedOrThrowEvaluator } from '../evaluator.mjs';
 
 /** https://tc39.es/ecma262/#sec-functiondeclarationinstantiation */
-export function* FunctionDeclarationInstantiation(func, argumentsList) {
+export function* FunctionDeclarationInstantiation(func, argumentsList): UnusedOrThrowEvaluator {
   // 1. Let calleeContext be the running execution context.
   const calleeContext = surroundingAgent.runningExecutionContext;
   // 2. Let code be func.[[ECMAScriptCode]].
@@ -113,8 +114,8 @@ export function* FunctionDeclarationInstantiation(func, argumentsList) {
   }
   // 21. For each String paramName in parameterNames, do
   for (const paramName of parameterNames) {
-    // a. Let alreadyDeclared be env.HasBinding(paramName).
-    const alreadyDeclared = env.HasBinding(paramName);
+    // a. Let alreadyDeclared be ! env.HasBinding(paramName).
+    const alreadyDeclared = X(env.HasBinding(paramName));
     // b. NOTE: Early errors ensure that duplicate parameter names can only occur in
     //    non-strict functions that do not have parameter default values or rest parameters.
     // c. If alreadyDeclared is false, then
@@ -151,8 +152,8 @@ export function* FunctionDeclarationInstantiation(func, argumentsList) {
       // i. Perform ! env.CreateMutableBinding("arguments", false).
       X(env.CreateMutableBinding(Value('arguments'), Value.false));
     }
-    // e. Call env.InitializeBinding("arguments", ao).
-    env.InitializeBinding(Value('arguments'), ao);
+    // e. Perform ! env.InitializeBinding("arguments", ao).
+    X(env.InitializeBinding(Value('arguments'), ao));
     // f. Let parameterBindings be a new List of parameterNames with "arguments" appended.
     parameterBindings = new ValueSet([...parameterNames, Value('arguments')]);
   } else {
@@ -183,8 +184,8 @@ export function* FunctionDeclarationInstantiation(func, argumentsList) {
         instantiatedVarNames.add(n);
         // 2. Perform ! env.CreateMutableBinding(n, false).
         X(env.CreateMutableBinding(n, Value.false));
-        // 3. Call env.InitializeBinding(n, undefined).
-        env.InitializeBinding(n, Value.undefined);
+        // 3. Perform ! env.InitializeBinding(n, undefined).
+        X(env.InitializeBinding(n, Value.undefined));
       }
     }
     // d. Let varEnv be env.
@@ -214,8 +215,8 @@ export function* FunctionDeclarationInstantiation(func, argumentsList) {
           // a. Let initialValue be ! env.GetBindingValue(n, false).
           initialValue = X(env.GetBindingValue(n, Value.false));
         }
-        // 5. Call varEnv.InitializeBinding(n, initialValue).
-        varEnv.InitializeBinding(n, initialValue);
+        // 5. Perform ! varEnv.InitializeBinding(n, initialValue).
+        X(varEnv.InitializeBinding(n, initialValue));
         // 6. NOTE: vars whose names are the same as a formal parameter, initially have the same value as the corresponding initialized parameter.
       }
     }

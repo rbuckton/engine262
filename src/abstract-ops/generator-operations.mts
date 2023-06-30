@@ -8,7 +8,7 @@ import {
 } from '../completion.mjs';
 import { surroundingAgent } from '../engine.mjs';
 import { Value } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
 import { resume } from '../helpers.mjs';
 import {
   Assert,
@@ -41,7 +41,7 @@ export function GeneratorStart(generator, generatorBody) {
       // Note: Engine262 can only perform the "If generatorBody is an Abstract Closure" check:
       yield* typeof generatorBody === 'function'
         ? generatorBody()
-        : Evaluate(generatorBody),
+        : Evaluation(generatorBody),
     );
     // c. Assert: If we return here, the generator either threw an exception or
     //    performed either an implicit or explicit return.
@@ -244,7 +244,7 @@ export function* GeneratorYield(iterNextObj) {
 }
 
 /** https://tc39.es/ecma262/#sec-yield */
-export function* Yield(value) {
+export function* Yield(value: Value): ExpressionEvaluator {
   // 1. Let generatorKind be GetGeneratorKind().
   const generatorKind = GetGeneratorKind();
   // 2. If generatorKind is async, return ? AsyncGeneratorYield(? Await(value)).

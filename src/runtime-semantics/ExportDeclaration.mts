@@ -1,16 +1,16 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import { Value } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type StatementEvaluator } from '../evaluator.mjs';
 import { GetValue } from '../abstract-ops/all.mjs';
 import { BoundNames, IsAnonymousFunctionDefinition } from '../static-semantics/all.mjs';
-import { NormalCompletion, Q } from '../completion.mjs';
+import { C, NormalCompletion, Q } from '../completion.mjs';
 import { OutOfRange } from '../helpers.mjs';
 import {
   NamedEvaluation,
   InitializeBoundName,
   BindingClassDeclarationEvaluation,
 } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-exports-runtime-semantics-evaluation */
 //   ExportDeclaration :
@@ -21,7 +21,7 @@ import {
 //     `export` `default` HoistableDeclaration
 //     `export` `default` ClassDeclaration
 //     `export` `default` AssignmentExpression `;`
-export function* Evaluate_ExportDeclaration(ExportDeclaration) {
+export function* Evaluate_ExportDeclaration(ExportDeclaration: ParseNode.ExportDeclaration): StatementEvaluator {
   const {
     FromClause, NamedExports,
     VariableStatement,
@@ -37,19 +37,19 @@ export function* Evaluate_ExportDeclaration(ExportDeclaration) {
     return NormalCompletion(undefined);
   }
   if (VariableStatement) {
-    // 1. Return the result of evaluating VariableStatement.
-    return yield* Evaluate(VariableStatement);
+    // 1. Return ? Evaluation of VariableStatement.
+    return C(Q(yield* Evaluation(VariableStatement)));
   }
   if (Declaration) {
-    // 1. Return the result of evaluating Declaration.
-    return yield* Evaluate(ExportDeclaration.Declaration);
+    // 1. Return ? Evaluation of Declaration.
+    return C(Q(yield* Evaluation(Declaration)));
   }
   if (!isDefault) {
     throw new OutOfRange('Evaluate_ExportDeclaration', ExportDeclaration);
   }
   if (HoistableDeclaration) {
-    // 1. Return the result of evaluating HoistableDeclaration.
-    return yield* Evaluate(HoistableDeclaration);
+    // 1. Return ? Evaluation of HoistableDeclaration.
+    return C(Q(yield* Evaluation(HoistableDeclaration)));
   }
   if (ClassDeclaration) {
     // 1. Let value be ? BindingClassDeclarationEvaluation of ClassDeclaration.
@@ -70,11 +70,11 @@ export function* Evaluate_ExportDeclaration(ExportDeclaration) {
     let value;
     // 1. If IsAnonymousFunctionDefinition(AssignmentExpression) is true, then
     if (IsAnonymousFunctionDefinition(AssignmentExpression)) {
-      // a. Let value be NamedEvaluation of AssignmentExpression with argument "default".
-      value = yield* NamedEvaluation(AssignmentExpression, Value('default'));
+      // a. Let value be ? NamedEvaluation of AssignmentExpression with argument "default".
+      value = Q(yield* NamedEvaluation(AssignmentExpression, Value('default')));
     } else { // 2. Else,
-      // a. Let rhs be the result of evaluating AssignmentExpression.
-      const rhs = yield* Evaluate(AssignmentExpression);
+      // a. Let rhs be ? Evaluation of AssignmentExpression.
+      const rhs = Q(yield* Evaluation(AssignmentExpression));
       // a. Let value be ? GetValue(rhs).
       value = Q(GetValue(rhs));
     }

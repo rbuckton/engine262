@@ -1,6 +1,6 @@
 // @ts-nocheck
 import {
-  Value, NumberValue, SymbolValue, JSStringValue, Descriptor,
+  Value, NumberValue, SymbolValue, StringValue, Descriptor, ObjectValue,
 } from '../value.mjs';
 import { Q, X } from '../completion.mjs';
 import {
@@ -25,6 +25,7 @@ import {
   isIntegerIndex,
   typedArrayInfoByName,
   F,
+  type BasicObjectValue,
 } from './all.mjs';
 
 export function isIntegerIndexedExoticObject(O) {
@@ -39,7 +40,7 @@ export function IntegerIndexedGetOwnProperty(P) {
   // 2. Assert: O is an Integer-Indexed exotic object.
   Assert(isIntegerIndexedExoticObject(O));
   // 3. If Type(P) is String, then
-  if (P instanceof JSStringValue) {
+  if (P instanceof StringValue) {
     // a. Let numericIndex be ! CanonicalNumericIndexString(P).
     const numericIndex = X(CanonicalNumericIndexString(P));
     // b. If numericIndex is not undefined, then
@@ -71,7 +72,7 @@ export function IntegerIndexedHasProperty(P) {
   // 2. Assert: O is an Integer-Indexed exotic object.
   Assert(isIntegerIndexedExoticObject(O));
   // 3. If Type(P) is String, then
-  if (P instanceof JSStringValue) {
+  if (P instanceof StringValue) {
     // a. Let numericIndex be ! CanonicalNumericIndexString(P).
     const numericIndex = X(CanonicalNumericIndexString(P));
     // b. If numericIndex is not undefined, then
@@ -102,7 +103,7 @@ export function IntegerIndexedDefineOwnProperty(P, Desc) {
   // 2. Assert: O is an Integer-Indexed exotic object.
   Assert(isIntegerIndexedExoticObject(O));
   // 3. If Type(P) is String, then
-  if (P instanceof JSStringValue) {
+  if (P instanceof StringValue) {
     // a. Let numericIndex be ! CanonicalNumericIndexString(P).
     const numericIndex = X(CanonicalNumericIndexString(P));
     // b. If numericIndex is not undefined, then
@@ -148,7 +149,7 @@ export function IntegerIndexedGet(P, Receiver) {
   // 1. Assert: IsPropertykey(P) is true.
   Assert(IsPropertyKey(P));
   // 2. If Type(P) is String, then
-  if (P instanceof JSStringValue) {
+  if (P instanceof StringValue) {
     // a. Let numericIndex be ! CanonicalNumericIndexString(P).
     const numericIndex = X(CanonicalNumericIndexString(P));
     // b. If numericIndex is not undefined, then
@@ -167,7 +168,7 @@ export function IntegerIndexedSet(P, V, Receiver) {
   // 1. Assert: IsPropertyKey(P) is true.
   Assert(IsPropertyKey(P));
   // 2. If Type(P) is String, then
-  if (P instanceof JSStringValue) {
+  if (P instanceof StringValue) {
     // a. Let numericIndex be ! CanonicalNumericIndexString(P).
     const numericIndex = X(CanonicalNumericIndexString(P));
     // b. If numericIndex is not undefined, then
@@ -190,7 +191,7 @@ export function IntegerIndexedDelete(P) {
   // 2. Assert: O is an Integer-Indexed exotic object.
   Assert(isIntegerIndexedExoticObject(O));
   // 3. If Type(P) is String, then
-  if (P instanceof JSStringValue) {
+  if (P instanceof StringValue) {
     // a. Let numericIndex be ! CanonicalNumericIndexString(P).
     const numericIndex = X(CanonicalNumericIndexString(P));
     // b. If numericIndex is not undefined, then
@@ -227,7 +228,7 @@ export function IntegerIndexedOwnPropertyKeys() {
   }
   // 5. For each own property key P of O such that Type(P) is String and P is not an integer index, in ascending chronological order of property creation, do
   for (const P of O.properties.keys()) {
-    if (P instanceof JSStringValue) {
+    if (P instanceof StringValue) {
       if (!isIntegerIndex(P)) {
         // a. Add P as the last element of keys.
         keys.push(P);
@@ -315,6 +316,18 @@ export function IntegerIndexedElementSet(O, index, value) {
   return Value.true;
 }
 
+/** https://tc39.es/ecma262/#integer-indexed-exotic-object */
+export type IntegerIndexedExoticObjectValue = BasicObjectValue<{
+  Prototype: ObjectValue;
+  Extensible: boolean;
+  ViewedArrayBuffer: unknown;
+  TypedArrayName: unknown;
+  ContentType: unknown;
+  ByteLength: number;
+  ByteOffset: number;
+  ArrayLength: number;
+}>;
+
 /** https://tc39.es/ecma262/#sec-integerindexedobjectcreate */
 export function IntegerIndexedObjectCreate(prototype) {
   // 1. Let internalSlotsList be « [[Prototype]], [[Extensible]], [[ViewedArrayBuffer]], [[TypedArrayName]], [[ContentType]], [[ByteLength]], [[ByteOffset]], [[ArrayLength]] ».
@@ -329,7 +342,7 @@ export function IntegerIndexedObjectCreate(prototype) {
     'ArrayLength',
   ];
   // 2. Let A be ! MakeBasicObject(internalSlotsList).
-  const A = X(MakeBasicObject(internalSlotsList));
+  const A = X(MakeBasicObject(internalSlotsList)) as IntegerIndexedExoticObjectValue;
   // 3. Set A.[[GetOwnProperty]] as specified in 9.4.5.1.
   A.GetOwnProperty = IntegerIndexedGetOwnProperty;
   // 4. Set A.[[HasProperty]] as specified in 9.4.5.2.

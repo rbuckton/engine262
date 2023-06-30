@@ -166,12 +166,12 @@ export function bootstrapMath(realmRec) {
       return F(Math[name](...args));
     };
     const func = CreateBuiltinFunction(method, length, Value(name), [], realmRec);
-    mathObj.DefineOwnProperty(Value(name), Descriptor({
+    X(mathObj.DefineOwnProperty(Value(name), Descriptor({
       Value: func,
       Writable: Value.true,
       Enumerable: Value.false,
       Configurable: Value.true,
-    }));
+    })));
   });
 
   realmRec.Intrinsics['%Math%'] = mathObj;

@@ -15,7 +15,7 @@ import { NewDeclarativeEnvironment } from '../environment.mjs';
 //   FunctionExpression :
 //     `function` `(` FormalParameters `)` `{` FunctionBody `}`
 //     `function` BindingIdentifier `(` FormalParameters `)` `{` FunctionBody `}`
-export function InstantiateOrdinaryFunctionExpression(FunctionExpression, name) {
+export function InstantiateOrdinaryFunctionExpression(FunctionExpression, name?) {
   const { BindingIdentifier, FormalParameters, FunctionBody } = FunctionExpression;
   if (BindingIdentifier) {
     // 1. Assert: name is not present.
@@ -27,7 +27,7 @@ export function InstantiateOrdinaryFunctionExpression(FunctionExpression, name) 
     // 4. Let funcEnv be NewDeclarativeEnvironment(scope).
     const funcEnv = NewDeclarativeEnvironment(scope);
     // 5. Perform funcEnv.CreateImmutableBinding(name, false).
-    funcEnv.CreateImmutableBinding(name, Value.false);
+    X(funcEnv.CreateImmutableBinding(name, Value.false));
     // 6. Let privateScope be the running execution context's PrivateEnvironment.
     const privateScope = surroundingAgent.runningExecutionContext.PrivateEnvironment;
     // 7. Let sourceText be the source text matched by FunctionExpression.
@@ -38,8 +38,8 @@ export function InstantiateOrdinaryFunctionExpression(FunctionExpression, name) 
     SetFunctionName(closure, name);
     // 10. Perform MakeConstructor(closure).
     MakeConstructor(closure);
-    // 11. Perform funcEnv.InitializeBinding(name, closure).
-    funcEnv.InitializeBinding(name, closure);
+    // 11. Perform ! funcEnv.InitializeBinding(name, closure).
+    X(funcEnv.InitializeBinding(name, closure));
     // 12. Return closure.
     return closure;
   }

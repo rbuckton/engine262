@@ -1,17 +1,25 @@
 // @ts-nocheck
 import { ExecutionContext, type GCMarker, surroundingAgent } from './engine.mjs';
 import {
-  Value, Descriptor, JSStringValue, NumberValue, ObjectValue, UndefinedValue, NullValue,
+  Value, Descriptor, StringValue, NumberValue, ObjectValue, NullValue, SymbolValue,
 } from './value.mjs';
 import {
-  ToString, DefinePropertyOrThrow, CreateBuiltinFunction,
+  ToString, DefinePropertyOrThrow, CreateBuiltinFunction, isECMAScriptFunctionObject,
 } from './abstract-ops/all.mjs';
-import { Completion, X } from './completion.mjs';
+import { X, type ExpressionCompletion } from './completion.mjs';
+import type { Evaluator } from './evaluator.mjs';
+import type { ParseNode } from './parser/ParseNode.mjs';
 
 export const kInternal = Symbol('kInternal');
 
-function convertValueForKey<T>(key: JSStringValue | NumberValue | T): string | number | T {
-  if (key instanceof JSStringValue) {
+type AsKey<T extends StringValue | NumberValue | SymbolValue> =
+  T extends StringValue ? string :
+  T extends NumberValue ? number :
+  T;
+
+function convertValueForKey<T extends StringValue | NumberValue | SymbolValue>(key: T | AsKey<T>): AsKey<T>;
+function convertValueForKey<T extends StringValue | NumberValue | SymbolValue>(key: T | AsKey<T>) {
+  if (key instanceof StringValue) {
     return key.stringValue();
   } else if (key instanceof NumberValue) {
     return key.numberValue();
@@ -19,8 +27,8 @@ function convertValueForKey<T>(key: JSStringValue | NumberValue | T): string | n
   return key;
 }
 
-export class ValueMap<K, V> {
-  private map: Map<K, V>;
+export class ValueMap<K extends StringValue | NumberValue | SymbolValue, V> {
+  private map: Map<AsKey<K>, V>;
   constructor() {
     this.map = new Map();
   }
@@ -29,20 +37,20 @@ export class ValueMap<K, V> {
     return this.map.size;
   }
 
-  get(key: K) {
+  get(key: K | AsKey<K>) {
     return this.map.get(convertValueForKey(key));
   }
 
-  set(key: K, value: V) {
+  set(key: K | AsKey<K>, value: V) {
     this.map.set(convertValueForKey(key), value);
     return this;
   }
 
-  has(key: K) {
+  has(key: K | AsKey<K>) {
     return this.map.has(convertValueForKey(key));
   }
 
-  delete(key: K) {
+  delete(key: K | AsKey<K>) {
     return this.map.delete(convertValueForKey(key));
   }
 
@@ -56,7 +64,7 @@ export class ValueMap<K, V> {
     return this[Symbol.iterator]();
   }
 
-  forEach(cb: (value: V, key: K | JSStringValue | NumberValue, thisValue: ValueMap<K, V>) => void) {
+  forEach(cb: (value: V, key: K | StringValue | NumberValue, thisValue: ValueMap<K, V>) => void) {
     for (const [key, value] of this.entries()) {
       cb(value, key, this);
     }
@@ -65,9 +73,9 @@ export class ValueMap<K, V> {
   * [Symbol.iterator]() {
     for (const [key, value] of this.map.entries()) {
       if (typeof key === 'string' || typeof key === 'number') {
-        yield [Value(key), value] as const;
+        yield [Value(key), value] as [K, V];
       } else {
-        yield [key, value] as const;
+        yield [key, value] as [unknown, V] as [K, V]; // NOTE: unsound cast
       }
     }
   }
@@ -80,9 +88,9 @@ export class ValueMap<K, V> {
   }
 }
 
-export class ValueSet<T> {
-  private set: Set<T>;
-  constructor(init: undefined | null | Iterable<T>) {
+export class ValueSet<T extends StringValue | NumberValue | SymbolValue> {
+  private set: Set<AsKey<T>>;
+  constructor(init?: undefined | null | Iterable<T>) {
     this.set = new Set();
     if (init !== undefined && init !== null) {
       for (const item of init) {
@@ -95,16 +103,16 @@ export class ValueSet<T> {
     return this.set.size;
   }
 
-  add(item: T) {
+  add(item: T | AsKey<T>) {
     this.set.add(convertValueForKey(item));
     return this;
   }
 
-  has(item: T) {
+  has(item: T | AsKey<T>) {
     return this.set.has(convertValueForKey(item));
   }
 
-  delete(item: T) {
+  delete(item: T | AsKey<T>) {
     return this.set.delete(convertValueForKey(item));
   }
 
@@ -112,12 +120,12 @@ export class ValueSet<T> {
     return this[Symbol.iterator]();
   }
 
-  * [Symbol.iterator]() {
+  * [Symbol.iterator](): IterableIterator<T> {
     for (const key of this.set.values()) {
       if (typeof key === 'string' || typeof key === 'number') {
-        yield Value(key);
+        yield Value(key) as T;
       } else {
-        yield key;
+        yield key as unknown as T; // NOTE: unsound cast
       }
     }
   }
@@ -138,7 +146,7 @@ export class OutOfRange extends RangeError {
   }
 }
 
-export function unwind(iterator, maxSteps = 1) {
+export function unwind<T>(iterator: Evaluator<T>, maxSteps = 1) {
   let steps = 0;
   while (true) {
     const { done, value } = iterator.next('Unwind');
@@ -161,8 +169,8 @@ export function handleInResume<T extends((...arg: Args) => Return), Args extends
   return bound;
 }
 
-export function resume(context: ExecutionContext, completion: Completion) {
-  const { value } = context.codeEvaluationState.next(completion);
+export function resume(context: ExecutionContext, completion: ExpressionCompletion) {
+  const { value } = context.codeEvaluationState!.next(completion); // NOTE: unsound non-null assertion
   if (typeof value === 'function' && value[kSafeToResume] === true) {
     return X(value());
   }
@@ -171,9 +179,9 @@ export function resume(context: ExecutionContext, completion: Completion) {
 
 export class CallSite {
   context: ExecutionContext;
-  lastNode = null;
-  lastCallNode = null;
-  inheritedLastCallNode = null;
+  lastNode: ParseNode | null = null;
+  lastCallNode: ParseNode.CallExpression | null  = null;
+  inheritedLastCallNode: ParseNode.CallExpression | null  = null;
   constructCall = false;
   constructor(context: ExecutionContext) {
     this.context = context;
@@ -197,7 +205,7 @@ export class CallSite {
   }
 
   isAsync() {
-    if (!(this.context.Function instanceof NullValue) && this.context.Function.ECMAScriptCode) {
+    if (!(this.context.Function instanceof NullValue) && isECMAScriptFunctionObject(this.context.Function) && this.context.Function.ECMAScriptCode) {
       const code = this.context.Function.ECMAScriptCode;
       return code.type === 'AsyncBody' || code.type === 'AsyncGeneratorBody';
     }
@@ -205,31 +213,31 @@ export class CallSite {
   }
 
   isNative() {
-    return !!(this.context.Function as FunctionObjectValue).nativeFunction;
+    return !(this.context.Function instanceof NullValue) && !isECMAScriptFunctionObject(this.context.Function) && !!this.context.Function.nativeFunction;
   }
 
   getFunctionName() {
     if (!(this.context.Function instanceof NullValue)) {
       const name = this.context.Function.properties.get(Value('name'));
       if (name) {
-        return X(ToString(name.Value)).stringValue();
+        return X(ToString(name.Value!)).stringValue(); // NOTE: unsound non-null assertion
       }
     }
     return null;
   }
 
   getSpecifier() {
-    if (!(this.context.Function instanceof NullValue)) {
-      return this.context.ScriptOrModule.HostDefined.specifier;
+    if (!(this.context.Function instanceof NullValue) && !(this.context.ScriptOrModule instanceof NullValue)) {
+      return this.context.ScriptOrModule.HostDefined?.specifier;
     }
     return null;
   }
 
-  setLocation(node) {
+  setLocation(node: ParseNode | null) {
     this.lastNode = node;
   }
 
-  setCallLocation(node) {
+  setCallLocation(node: ParseNode.CallExpression | null) {
     this.lastCallNode = node;
   }
 
@@ -358,7 +366,7 @@ export function captureStack(O: ObjectValue) {
     captureAsyncStack(stack);
   }
 
-  let cache: null | JSStringValue | UndefinedValue = null;
+  let cache: null | Value = null;
 
   const name = Value('stack');
   X(DefinePropertyOrThrow(O, name, Descriptor({
@@ -382,7 +390,7 @@ export function captureStack(O: ObjectValue) {
 }
 
 export function callable<Class extends object>(onCalled = (target: Class, _thisArg: unknown, args: unknown[]) => Reflect.construct(target, args)) {
-  return function decoartor(classValue: Class, _classContext: ClassDecoratorContext<Class>) {
+  return function decorator(classValue: Class, _classContext: ClassDecoratorContext<Class>) {
     return new Proxy(classValue, {
       apply: onCalled,
     });

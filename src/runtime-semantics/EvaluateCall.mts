@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import {
   ObjectValue, Value, ReferenceRecord,
@@ -11,14 +10,16 @@ import {
   PrepareForTailCall,
   Call,
 } from '../abstract-ops/all.mjs';
-import { Q, Completion, AbruptCompletion } from '../completion.mjs';
+import { Q, C } from '../completion.mjs';
 import { EnvironmentRecord } from '../environment.mjs';
 import { ArgumentListEvaluation } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
+import type { ExpressionEvaluator } from '../evaluator.mjs';
 
 /** https://tc39.es/ecma262/#sec-evaluatecall */
-export function* EvaluateCall(func, ref, args, tailPosition) {
-  // 1. If Type(ref) is Reference, then
-  let thisValue;
+export function* EvaluateCall(func: Value, ref: Value | ReferenceRecord, args: ParseNode.Arguments | ParseNode.TemplateLiteral, tailPosition: boolean): ExpressionEvaluator {
+  // 1. If ref is a Reference Record, then
+  let thisValue: Value;
   if (ref instanceof ReferenceRecord) {
     // a. If IsPropertyReference(ref) is true, then
     if (IsPropertyReference(ref) === Value.true) {
@@ -40,24 +41,16 @@ export function* EvaluateCall(func, ref, args, tailPosition) {
   const argList = Q(yield* ArgumentListEvaluation(args));
   // 4. If Type(func) is not Object, throw a TypeError exception.
   if (!(func instanceof ObjectValue)) {
-    return surroundingAgent.Throw('TypeError', 'NotAFunction', func);
+    return C(surroundingAgent.Throw('TypeError', 'NotAFunction', func));
   }
   // 5. If IsCallable(func) is false, throw a TypeError exception.
   if (IsCallable(func) === Value.false) {
-    return surroundingAgent.Throw('TypeError', 'NotAFunction', func);
+    return C(surroundingAgent.Throw('TypeError', 'NotAFunction', func));
   }
   // 6. If tailPosition is true, perform PrepareForTailCall().
   if (tailPosition) {
     PrepareForTailCall();
   }
-  // 7. Let result be Call(func, thisValue, argList).
-  const result = Call(func, thisValue, argList);
-  // 8. Assert: If tailPosition is true, the above call will not return here but instead
-  //    evaluation will continue as if the following return has already occurred.
-  // 9. Assert: If result is not an abrupt completion, then Type(result) is an ECMAScript language type.
-  if (!(result instanceof AbruptCompletion)) {
-    Assert(result instanceof Value || result instanceof Completion);
-  }
-  // 10. Return result.
-  return result;
+  // 7. Return ? Call(func, thisValue, argList).
+  return C(Q(Call(func, thisValue, argList)));
 }

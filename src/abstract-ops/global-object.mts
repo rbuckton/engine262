@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { ExecutionContext, HostEnsureCanCompileStrings, surroundingAgent } from '../engine.mjs';
-import { JSStringValue, Value } from '../value.mjs';
+import { StringValue, Value } from '../value.mjs';
 import { InstantiateFunctionObject } from '../runtime-semantics/all.mjs';
 import {
   IsStrict,
@@ -24,8 +24,10 @@ import {
   FunctionEnvironmentRecord,
   GlobalEnvironmentRecord,
   ObjectEnvironmentRecord,
+  DeclarativeEnvironmentRecord,
+  EnvironmentRecord,
 } from '../environment.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation } from '../evaluator.mjs';
 import { unwind, ValueSet } from '../helpers.mjs';
 import { Assert, GetThisEnvironment } from './all.mjs';
 
@@ -39,7 +41,7 @@ export function PerformEval(x, callerRealm, strictCaller, direct) {
     Assert(strictCaller === false);
   }
   // 2. If Type(x) is not String, return x.
-  if (!(x instanceof JSStringValue)) {
+  if (!(x instanceof StringValue)) {
     return x;
   }
   // 3. Let evalRealm be the current Realm Record.
@@ -174,7 +176,7 @@ export function PerformEval(x, callerRealm, strictCaller, direct) {
   // 28. If result.[[Type]] is normal, then
   if (result.Type === 'normal') {
     // a. Set result to the result of evaluating body.
-    result = EnsureCompletion(unwind(Evaluate(body)));
+    result = EnsureCompletion(unwind(Evaluation(body)));
   }
   // 29. If result.[[Type]] is normal and result.[[Value]] is empty, then
   if (result.Type === 'normal' && result.Value === undefined) {
@@ -189,7 +191,7 @@ export function PerformEval(x, callerRealm, strictCaller, direct) {
 }
 
 /** https://tc39.es/ecma262/#sec-evaldeclarationinstantiation */
-function EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strict) {
+function EvalDeclarationInstantiation(body, varEnv, lexEnv: DeclarativeEnvironmentRecord, privateEnv, strict) {
   // 1. Let varNames be the VarDeclaredNames of body.
   const varNames = VarDeclaredNames(body);
   // 2. Let varDeclarations be the VarScopedDeclarations of body.
@@ -208,7 +210,7 @@ function EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strict) 
       }
     }
     // b. Let thisLex be lexEnv.
-    let thisEnv = lexEnv;
+    let thisEnv: EnvironmentRecord = lexEnv;
     // c. Assert: The following loop will terminate.
     // d. Repeat, while thisEnv is not the same as varEnv,
     while (thisEnv !== varEnv) {
@@ -217,8 +219,8 @@ function EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strict) 
         // 1. NOTE: The environment of with statements cannot contain any lexical declaration so it doesn't need to be checked for var/let hoisting conflicts.
         // 2. For each name in varNames, do
         for (const name of varNames) {
-          // a. If thisEnv.HasBinding(name) is true, then
-          if (thisEnv.HasBinding(name) === Value.true) {
+          // a. If ! thisEnv.HasBinding(name) is true, then
+          if (X(thisEnv.HasBinding(name)) === Value.true) {
             // i. Throw a SyntaxError exception.
             return surroundingAgent.Throw('SyntaxError', 'AlreadyDeclared', name);
             // ii. NOTE: Annex B.3.5 defines alternate semantics for the above step.
@@ -343,8 +345,8 @@ function EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strict) 
       // i. Perform ? varEnv.CreateGlobalFunctionBinding(fn, fo, true).
       Q(varEnv.CreateGlobalFunctionBinding(fn, fo, Value.true));
     } else { // d. Else,
-      // i. Let bindingExists be varEnv.HasBinding(fn).
-      const bindingExists = varEnv.HasBinding(fn);
+      // i. Let bindingExists be ! varEnv.HasBinding(fn).
+      const bindingExists = X(varEnv.HasBinding(fn));
       // ii. If bindingExists is false, then
       if (bindingExists === Value.false) {
         // 1. Let status be ! varEnv.CreateMutableBinding(fn, true).
@@ -366,8 +368,8 @@ function EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strict) 
       // i. Perform ? varEnv.CreateGlobalVarBinding(vn, true).
       Q(varEnv.CreateGlobalVarBinding(vn, Value.true));
     } else { // b. Else,
-      // i. Let bindingExists be varEnv.HasBinding(vn).
-      const bindingExists = varEnv.HasBinding(vn);
+      // i. Let bindingExists be ! varEnv.HasBinding(vn).
+      const bindingExists = X(varEnv.HasBinding(vn));
       // ii. If bindingExists is false, then
       if (bindingExists === Value.false) {
         // 1. Let status be ! varEnv.CreateMutableBinding(vn, true).

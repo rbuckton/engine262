@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import { ObjectValue, Value } from '../value.mjs';
 import {
@@ -21,21 +20,22 @@ import {
   Completion,
   NormalCompletion,
   EnsureCompletion,
-  Q, X,
+  Q, X, C,
 } from '../completion.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-generator-function-definitions-runtime-semantics-evaluation */
 //   YieldExpression :
 //     `yield`
 //     `yield` AssignmentExpression
 //     `yield` `*` AssignmentExpression
-export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }) {
+export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }: ParseNode.YieldExpression): ExpressionEvaluator {
   if (hasStar) {
     // 1. Let generatorKind be ! GetGeneratorKind().
     const generatorKind = X(GetGeneratorKind());
-    // 2. Let exprRef be the result of evaluating AssignmentExpression.
-    const exprRef = yield* Evaluate(AssignmentExpression);
+    // 2. Let exprRef be ? Evaluation of AssignmentExpression.
+    const exprRef = Q(yield* Evaluation(AssignmentExpression!)); // NOTE: unsound non-null assertion
     // 3. Let value be ? GetValue(exprRef).
     const value = Q(GetValue(exprRef));
     // 4. Let iteratorRecord be ? GetIterator(value, generatorKind).
@@ -43,7 +43,7 @@ export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }) {
     // 5. Let iterator be iteratorRecord.[[Iterator]].
     const iterator = iteratorRecord.Iterator;
     // 6. Let received be NormalCompletion(undefined).
-    let received = NormalCompletion(Value.undefined);
+    let received = NormalCompletion(Value.undefined) as Completion<Value>;
     // 7. Repeat,
     while (true) {
       // a. If received.[[Type]] is normal, then
@@ -63,13 +63,13 @@ export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }) {
         // v. If done is true, then
         if (done === Value.true) {
           // 1. Return ? IteratorValue(innerResult).
-          return Q(IteratorValue(innerResult));
+          return C(Q(IteratorValue(innerResult)));
         }
         // vi. If generatorKind is async, then set received to AsyncGeneratorYield(? IteratorValue(innerResult)).
         if (generatorKind === 'async') {
-          received = yield* AsyncGeneratorYield(Q(IteratorValue(innerResult)));
+          received = Completion(yield* AsyncGeneratorYield(Q(IteratorValue(innerResult))));
         } else { // vii. Else, set received to GeneratorYield(innerResult).
-          received = yield* GeneratorYield(innerResult);
+          received = Completion(yield* GeneratorYield(innerResult));
         }
       } else if (received.Type === 'throw') { // b. Else if received.[[Type]] is throw, then
         // i. Let throw be ? GetMethod(iterator, "throw").
@@ -92,7 +92,7 @@ export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }) {
           // 6. If done is true, then
           if (done === Value.true) {
             // a. Return ? IteratorValue(innerResult).
-            return Q(IteratorValue(innerResult));
+            return C(Q(IteratorValue(innerResult)));
           }
           // 7. If generatorKind is async, then set received to AsyncGeneratorYield(? IteratorValue(innerResult)).
           if (generatorKind === 'async') {
@@ -122,12 +122,15 @@ export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }) {
         const ret = Q(GetMethod(iterator, Value('return')));
         // iii. If return is undefined, then
         if (ret === Value.undefined) {
-          // 1. If generatorKind is async, then set received.[[Value]] to ? Await(received.[[Value]]).
+          // 1. Let value be received.[[Value]].
+          let value = received.Value;
+          // 2. If generatorKind is async, then
           if (generatorKind === 'async') {
-            received.Value = Q(yield* Await(received.Value));
+            // a. Set value to ? Await(value).
+            value = Q(yield* Await(value));
           }
-          // 2. Return Completion(received).
-          return Completion(received);
+          // 3. Return the Completion Record { [[Type]]: return, [[Value]]: value, [[Target]]: empty }.
+          return new Completion({ Type: 'return', Value: value, Target: undefined });
         }
         // iv. Let innerReturnResult be ? Call(return, iterator, « received.[[Value]] »).
         let innerReturnResult = Q(Call(ret, iterator, [received.Value]));
@@ -159,13 +162,13 @@ export function* Evaluate_YieldExpression({ hasStar, AssignmentExpression }) {
     }
   }
   if (AssignmentExpression) {
-    // 1. Let exprRef be the result of evaluating AssignmentExpression.
-    const exprRef = yield* Evaluate(AssignmentExpression);
+    // 1. Let exprRef be ? Evaluation of AssignmentExpression.
+    const exprRef = Q(yield* Evaluation(AssignmentExpression));
     // 2. Let value be ? GetValue(exprRef).
     const value = Q(GetValue(exprRef));
     // 3. Return ? Yield(value).
-    return Q(yield* Yield(value));
+    return C(Q(yield* Yield(value)));
   }
   // 1. Return ? Yield(undefined).
-  return Q(yield* Yield(Value.undefined));
+  return C(Q(yield* Yield(Value.undefined)));
 }

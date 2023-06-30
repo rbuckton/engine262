@@ -1,8 +1,7 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import { Value } from '../value.mjs';
 import { ToObject, GetValue } from '../abstract-ops/all.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type StatementEvaluator } from '../evaluator.mjs';
 import { NewObjectEnvironment } from '../environment.mjs';
 import {
   UpdateEmpty,
@@ -10,12 +9,13 @@ import {
   EnsureCompletion,
   Q,
 } from '../completion.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-with-statement-runtime-semantics-evaluation */
 //   WithStatement : `with` `(` Expression `)` Statement
-export function* Evaluate_WithStatement({ Expression, Statement }) {
-  // 1. Let val be the result of evaluating Expression.
-  const val = yield* Evaluate(Expression);
+export function* Evaluate_WithStatement({ Expression, Statement }: ParseNode.WithStatement): StatementEvaluator {
+  // 1. Let val be ? Evaluation of Expression.
+  const val = Q(yield* Evaluation(Expression));
   // 2. Let obj be ? ToObject(? GetValue(val)).
   const obj = Q(ToObject(Q(GetValue(val))));
   // 3. Let oldEnv be the running execution context's LexicalEnvironment.
@@ -25,7 +25,7 @@ export function* Evaluate_WithStatement({ Expression, Statement }) {
   // 5. Set the running execution context's LexicalEnvironment to newEnv.
   surroundingAgent.runningExecutionContext.LexicalEnvironment = newEnv;
   // 6. Let C be the result of evaluating Statement.
-  const C = EnsureCompletion(yield* Evaluate(Statement));
+  const C = EnsureCompletion(yield* Evaluation(Statement));
   // 7. Set the running execution context's LexicalEnvironment to oldEnv.
   surroundingAgent.runningExecutionContext.LexicalEnvironment = oldEnv;
   // 8. Return Completion(UpdateEmpty(C, undefined)).

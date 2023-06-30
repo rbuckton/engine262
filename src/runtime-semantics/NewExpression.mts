@@ -1,26 +1,27 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import {
   Assert,
   Construct,
   GetValue,
   IsConstructor,
+  type ConstructorValue,
 } from '../abstract-ops/all.mjs';
 import { Value } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
-import { Q } from '../completion.mjs';
+import { Evaluation, type ExpressionEvaluator } from '../evaluator.mjs';
+import { C, Q } from '../completion.mjs';
 import { ArgumentListEvaluation } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-evaluatenew */
-function* EvaluateNew(constructExpr, args) {
+function* EvaluateNew(constructExpr: ParseNode.LeftHandSideExpression, args: ParseNode.Arguments | undefined): ExpressionEvaluator {
   // 1. Assert: constructExpr is either a NewExpression or a MemberExpression.
   // 2. Assert: arguments is either empty or an Arguments.
   Assert(args === undefined || Array.isArray(args));
-  // 3. Let ref be the result of evaluating constructExpr.
-  const ref = yield* Evaluate(constructExpr);
+  // 3. Let ref be ? Evaluation of constructExpr.
+  const ref = Q(yield* Evaluation(constructExpr));
   // 4. Let constructor be ? GetValue(ref).
   const constructor = Q(GetValue(ref));
-  let argList;
+  let argList: readonly Value[];
   // 5. If arguments is empty, let argList be a new empty List.
   if (args === undefined) {
     argList = [];
@@ -30,22 +31,22 @@ function* EvaluateNew(constructExpr, args) {
   }
   // 7. If IsConstructor(constructor) is false, throw a TypeError exception.
   if (IsConstructor(constructor) === Value.false) {
-    return surroundingAgent.Throw('TypeError', 'NotAConstructor', constructor);
+    return C(surroundingAgent.Throw('TypeError', 'NotAConstructor', constructor));
   }
   // 8. Return ? Construct(constructor, argList).
-  return Q(Construct(constructor, argList));
+  return C(Q(Construct(constructor as ConstructorValue, argList))); // NOTE: unsound cast
 }
 
 /** https://tc39.es/ecma262/#sec-new-operator-runtime-semantics-evaluation */
 //   NewExpression :
 //     `new` NewExpression
 //     `new` MemberExpression Arguments
-export function* Evaluate_NewExpression({ MemberExpression, Arguments }) {
+export function* Evaluate_NewExpression({ MemberExpression, Arguments }: ParseNode.NewExpression): ExpressionEvaluator {
   if (!Arguments) {
     // 1. Return ? EvaluateNew(NewExpression, empty).
-    return Q(yield* EvaluateNew(MemberExpression, undefined));
+    return C(Q(yield* EvaluateNew(MemberExpression, undefined)));
   } else {
     // 1. Return ? EvaluateNew(MemberExpression, Arguments).
-    return Q(yield* EvaluateNew(MemberExpression, Arguments));
+    return C(Q(yield* EvaluateNew(MemberExpression, Arguments)));
   }
 }

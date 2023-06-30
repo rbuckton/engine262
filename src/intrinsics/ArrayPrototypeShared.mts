@@ -9,7 +9,7 @@ import {
   IsCallable,
   SameValueZero,
   Set,
-  StrictEqualityComparison,
+  IsStrictlyEqual,
   ToBoolean,
   ToIntegerOrInfinity,
   ToObject,
@@ -332,7 +332,7 @@ export function bootstrapArrayPrototypeShared(realmRec, proto, priorToEvaluating
       const kPresent = Q(HasProperty(O, kStr));
       if (kPresent === Value.true) {
         const elementK = Q(Get(O, kStr));
-        const same = StrictEqualityComparison(searchElement, elementK);
+        const same = IsStrictlyEqual(searchElement, elementK);
         if (same === Value.true) {
           return F(k);
         }
@@ -400,7 +400,7 @@ export function bootstrapArrayPrototypeShared(realmRec, proto, priorToEvaluating
       const kPresent = Q(HasProperty(O, kStr));
       if (kPresent === Value.true) {
         const elementK = Q(Get(O, kStr));
-        const same = StrictEqualityComparison(searchElement, elementK);
+        const same = IsStrictlyEqual(searchElement, elementK);
         if (same === Value.true) {
           return F(k);
         }

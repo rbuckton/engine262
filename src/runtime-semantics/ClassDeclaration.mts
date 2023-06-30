@@ -1,16 +1,17 @@
-// @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import { Value } from '../value.mjs';
-import { sourceTextMatchedBy } from '../abstract-ops/all.mjs';
+import { sourceTextMatchedBy, type FunctionObjectValue } from '../abstract-ops/all.mjs';
 import { StringValue } from '../static-semantics/all.mjs';
-import { Q, NormalCompletion } from '../completion.mjs';
+import { Q, NormalCompletion, C } from '../completion.mjs';
 import { InitializeBoundName, ClassDefinitionEvaluation } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
+import type { ExpressionEvaluator, StatementEvaluator } from '../evaluator.mjs';
 
 /** https://tc39.es/ecma262/#sec-runtime-semantics-bindingclassdeclarationevaluation */
 //   ClassDeclaration :
 //     `class` BindingIdentifier ClassTail
 //     `class` ClassTail
-export function* BindingClassDeclarationEvaluation(ClassDeclaration) {
+export function* BindingClassDeclarationEvaluation(ClassDeclaration: ParseNode.ClassDeclaration): ExpressionEvaluator<FunctionObjectValue> {
   const { BindingIdentifier, ClassTail } = ClassDeclaration;
   if (!BindingIdentifier) {
     // 1. Let value be ? ClassDefinitionEvaluation of ClassTail with arguments undefined and "default".
@@ -18,7 +19,7 @@ export function* BindingClassDeclarationEvaluation(ClassDeclaration) {
     // 2. Set value.[[SourceText]] to the source text matched by ClassDeclaration.
     value.SourceText = sourceTextMatchedBy(ClassDeclaration);
     // 3. Return value.
-    return value;
+    return C(value);
   }
   // 1. Let className be StringValue of BindingIdentifier.
   const className = StringValue(BindingIdentifier);
@@ -31,12 +32,12 @@ export function* BindingClassDeclarationEvaluation(ClassDeclaration) {
   // 5. Perform ? InitializeBoundName(className, value, env).
   Q(InitializeBoundName(className, value, env));
   // 6. Return value.
-  return value;
+  return C(value);
 }
 
 /** https://tc39.es/ecma262/#sec-class-definitions-runtime-semantics-evaluation */
-//   ClassDeclaration : `class` BindingIdentifier ClassTAil
-export function* Evaluate_ClassDeclaration(ClassDeclaration) {
+//   ClassDeclaration : `class` BindingIdentifier ClassTail
+export function* Evaluate_ClassDeclaration(ClassDeclaration: ParseNode.ClassDeclaration): StatementEvaluator {
   // 1. Perform ? BindingClassDeclarationEvaluation of this ClassDeclaration.
   Q(yield* BindingClassDeclarationEvaluation(ClassDeclaration));
   // 2. Return NormalCompletion(empty).

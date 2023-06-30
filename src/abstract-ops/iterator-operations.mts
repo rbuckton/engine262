@@ -35,8 +35,15 @@ import {
 // and
 /** https://tc39.es/ecma262/#sec-iteration */
 
+/** https://tc39.es/ecma262/#sec-iterator-records */
+export interface IteratorRecord {
+  Iterator: ObjectValue;
+  NextMethod: Value;
+  Done: BooleanValue;
+}
+
 /** https://tc39.es/ecma262/#sec-getiterator */
-export function GetIterator(obj, hint, method) {
+export function GetIterator(obj, hint?, method?) {
   if (!hint) {
     hint = 'sync';
   }
@@ -58,7 +65,7 @@ export function GetIterator(obj, hint, method) {
     return surroundingAgent.Throw('TypeError', 'NotAnObject', iterator);
   }
   const nextMethod = Q(GetV(iterator, Value('next')));
-  const iteratorRecord = {
+  const iteratorRecord: IteratorRecord = {
     Iterator: iterator,
     NextMethod: nextMethod,
     Done: Value.false,

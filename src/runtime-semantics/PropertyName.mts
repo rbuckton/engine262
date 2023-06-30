@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { surroundingAgent } from '../engine.mjs';
 import { Value } from '../value.mjs';
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation } from '../evaluator.mjs';
 import { StringValue, NumericValue } from '../static-semantics/all.mjs';
 import {
   Assert,
@@ -49,7 +49,7 @@ export function* Evaluate_PropertyName(PropertyName) {
     }
     default: {
       // 1. Let exprValue be the result of evaluating AssignmentExpression.
-      const exprValue = yield* Evaluate(PropertyName.ComputedPropertyName);
+      const exprValue = yield* Evaluation(PropertyName.ComputedPropertyName);
       // 2. Let propName be ? GetValue(exprValue).
       const propName = Q(GetValue(exprValue));
       // 3. Return ? ToPropertyKey(propName).

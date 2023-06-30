@@ -1,6 +1,6 @@
 // @ts-nocheck
-import { Value } from '../value.mjs';
-import { sourceTextMatchedBy } from '../abstract-ops/all.mjs';
+import { Value, type PropertyKeyValue, PrivateName } from '../value.mjs';
+import { sourceTextMatchedBy, type FunctionObjectValue } from '../abstract-ops/all.mjs';
 import { ReturnIfAbrupt } from '../completion.mjs';
 import { OutOfRange } from '../helpers.mjs';
 import {
@@ -12,6 +12,8 @@ import {
   InstantiateArrowFunctionExpression,
   InstantiateAsyncArrowFunctionExpression,
 } from './all.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
+import type { ExpressionEvaluator } from '../evaluator.mjs';
 
 /** https://tc39.es/ecma262/#sec-function-definitions-runtime-semantics-namedevaluation */
 //   FunctionExpression :
@@ -70,7 +72,7 @@ function* NamedEvaluation_ClassExpression(ClassExpression, name) {
   return value;
 }
 
-export function* NamedEvaluation(F, name) {
+export function* NamedEvaluation(F: ParseNode, name: PropertyKeyValue | PrivateName): ExpressionEvaluator<FunctionObjectValue> {
   switch (F.type) {
     case 'FunctionExpression':
       return NamedEvaluation_FunctionExpression(F, name);

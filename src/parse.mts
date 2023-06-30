@@ -1,14 +1,14 @@
-// @ts-nocheck
-import { Parser } from './parser/Parser.mjs';
+import { Parser, type ParserOptions } from './parser/Parser.mjs';
 import { RegExpParser } from './parser/RegExpParser.mjs';
-import { surroundingAgent } from './engine.mjs';
-import { SourceTextModuleRecord } from './modules.mjs';
-import { Value } from './value.mjs';
+import { surroundingAgent, type GCMarker } from './engine.mjs';
+import { AbstractModuleRecord, SourceTextModuleRecord } from './modules.mjs';
+import { Value, type StringValue, ObjectValue } from './value.mjs';
 import {
   Get,
   Set,
   Call,
   CreateDefaultExportSyntheticModule,
+  Realm,
 } from './abstract-ops/all.mjs';
 import { Q, X } from './completion.mjs';
 import {
@@ -17,17 +17,18 @@ import {
   ExportEntries,
   ImportedLocalNames,
 } from './static-semantics/all.mjs';
-import { ValueSet, kInternal } from './helpers.mjs';
+import { ValueSet, isArray, kInternal } from './helpers.mjs';
+import type { ParseNode } from './parser/ParseNode.mjs';
 
 export { Parser, RegExpParser };
 
-function handleError(e) {
-  if (e.name === 'SyntaxError') {
-    const v = surroundingAgent.Throw('SyntaxError', 'Raw', e.message).Value;
-    if (e.decoration) {
+function handleError(e: unknown) {
+  if ((e as Error).name === 'SyntaxError') { // TODO: unsound cast
+    const v = surroundingAgent.Throw('SyntaxError', 'Raw', (e as SyntaxError).message).Value as ObjectValue; // TODO: unsound cast
+    if ((e as SyntaxError).decoration) {
       const stackString = Value('stack');
-      const stack = X(Get(v, stackString)).stringValue();
-      const newStackString = `${e.decoration}\n${stack}`;
+      const stack = (X(Get(v, stackString)) as StringValue).stringValue(); // TODO: unsound cast
+      const newStackString = `${(e as SyntaxError).decoration}\n${stack}`;
       X(Set(v, stackString, Value(newStackString), Value.true));
     }
     return v;
@@ -36,7 +37,7 @@ function handleError(e) {
   }
 }
 
-export function wrappedParse(init, f) {
+export function wrappedParse<T>(init: ParserOptions, f: (p: Parser) => T): T | readonly Value[] {
   const p = new Parser(init);
 
   try {
@@ -50,7 +51,15 @@ export function wrappedParse(init, f) {
   }
 }
 
-export function ParseScript(sourceText, realm, hostDefined = {}) {
+export interface ScriptRecord {
+  Realm: Realm;
+  ECMAScriptCode: ParseNode.Script;
+  LoadedModules: { Specifier: StringValue, Module: AbstractModuleRecord }[];
+  HostDefined: { specifier?: string } | undefined;
+  mark?(m: GCMarker): void;
+}
+
+export function ParseScript(sourceText: string, realm: Realm, hostDefined: { specifier?: string, [kInternal]?: { json?: boolean } } = {}): ScriptRecord | readonly Value[] {
   // 1. Assert: sourceText is an ECMAScript source text (see clause 10).
   // 2. Parse sourceText using Script as the goal symbol and analyse the parse result for
   //    any Early Error conditions. If the parse was successful and no early errors were found,
@@ -65,7 +74,7 @@ export function ParseScript(sourceText, realm, hostDefined = {}) {
     json: hostDefined[kInternal]?.json,
   }, (p) => p.parseScript());
   // 3. If body is a List of errors, return body.
-  if (Array.isArray(body)) {
+  if (isArray(body)) {
     return body;
   }
   // 4. Return Script Record { [[Realm]]: realm, [[ECMAScriptCode]]: body, [[HostDefined]]: hostDefined }.
@@ -74,17 +83,17 @@ export function ParseScript(sourceText, realm, hostDefined = {}) {
     ECMAScriptCode: body,
     LoadedModules: [],
     HostDefined: hostDefined,
-    mark(m) {
+    mark(m: GCMarker) {
       m(this.Realm);
-      m(this.Environment);
+      m(this.ECMAScriptCode);
       for (const v of this.LoadedModules) {
         m(v.Module);
       }
     },
-  };
+  } satisfies ScriptRecord;
 }
 
-export function ParseModule(sourceText, realm, hostDefined = {}) {
+export function ParseModule(sourceText: string, realm: Realm, hostDefined: { specifier?: string, SourceTextModuleRecord?: typeof SourceTextModuleRecord } = {}) {
   // 1. Assert: sourceText is an ECMAScript source text (see clause 10).
   // 2. Parse sourceText using Module as the goal symbol and analyse the parse result for
   //    any Early Error conditions. If the parse was successful and no early errors were found,
@@ -95,7 +104,7 @@ export function ParseModule(sourceText, realm, hostDefined = {}) {
   //    objects in the list is implementation-dependent, but at least one must be present.
   const body = wrappedParse({ source: sourceText, specifier: hostDefined.specifier }, (p) => p.parseModule());
   // 3. If body is a List of errors, return body.
-  if (Array.isArray(body)) {
+  if (isArray(body)) {
     return body;
   }
   // 4. Let requestedModules be the ModuleRequests of body.
@@ -122,7 +131,7 @@ export function ParseModule(sourceText, realm, hostDefined = {}) {
         localExportEntries.push(ee);
       } else { // ii. Else,
         // 1. Let ie be the element of importEntries whose [[LocalName]] is the same as ee.[[LocalName]].
-        const ie = importEntries.find((e) => e.LocalName.stringValue() === ee.LocalName.stringValue());
+        const ie = importEntries.find((e) => e.LocalName.stringValue() === ee.LocalName.stringValue())!; // TODO: unsound non-null assertion
         // 2. If ie.[[ImportName]] is ~namespace-object~, then
         if (ie.ImportName === 'namespace-object') {
           // a. NOTE: This is a re-export of an imported module namespace object.
@@ -150,10 +159,10 @@ export function ParseModule(sourceText, realm, hostDefined = {}) {
   // 12. Return Source Text Module Record { [[Realm]]: realm, [[Environment]]: undefined, [[Namespace]]: undefined, [[Status]]: unlinked, [[EvaluationError]]: undefined, [[HostDefined]]: hostDefined, [[ECMAScriptCode]]: body, [[Context]]: empty, [[ImportMeta]]: empty, [[RequestedModules]]: requestedModules, [[ImportEntries]]: importEntries, [[LocalExportEntries]]: localExportEntries, [[IndirectExportEntries]]: indirectExportEntries, [[StarExportEntries]]: starExportEntries, [[DFSIndex]]: undefined, [[DFSAncestorIndex]]: undefined }.
   return new (hostDefined.SourceTextModuleRecord || SourceTextModuleRecord)({
     Realm: realm,
-    Environment: Value.undefined,
-    Namespace: Value.undefined,
+    Environment: undefined,
+    Namespace: undefined,
     Status: 'new',
-    EvaluationError: Value.undefined,
+    EvaluationError: undefined,
     HostDefined: hostDefined,
     ECMAScriptCode: body,
     Context: undefined,
@@ -164,19 +173,22 @@ export function ParseModule(sourceText, realm, hostDefined = {}) {
     LocalExportEntries: localExportEntries,
     IndirectExportEntries: indirectExportEntries,
     StarExportEntries: starExportEntries,
-    DFSIndex: Value.undefined,
-    DFSAncestorIndex: Value.undefined,
+    DFSIndex: undefined,
+    DFSAncestorIndex: undefined,
 
     Async: body.hasTopLevelAwait ? Value.true : Value.false,
     AsyncEvaluating: Value.false,
-    TopLevelCapability: Value.undefined,
-    AsyncParentModules: Value.undefined,
-    PendingAsyncDependencies: Value.undefined,
+    TopLevelCapability: undefined,
+    AsyncParentModules: [],
+    PendingAsyncDependencies: undefined,
   });
 }
 
-/** https://tc39.es/ecma262/#sec-parsejsonmodule */
-export function ParseJSONModule(sourceText, realm, hostDefined) {
+/**
+ * https://tc39.es/ecma262/#sec-parsejsonmodule (TODO: missing)
+ * https://tc39.es/proposal-json-modules/#sec-parse-json-module (TODO: is this correct?)
+ */
+export function ParseJSONModule(sourceText: StringValue, realm: Realm, hostDefined: unknown) {
   // 1. Let jsonParse be realm's intrinsic object named "%JSON.parse%".
   const jsonParse = realm.Intrinsics['%JSON.parse%'];
   // 1. Let json be ? Call(jsonParse, undefined, « sourceText »).
@@ -186,8 +198,8 @@ export function ParseJSONModule(sourceText, realm, hostDefined) {
 }
 
 /** https://tc39.es/ecma262/#sec-parsepattern */
-export function ParsePattern(patternText, u) {
-  const parse = (flags) => {
+export function ParsePattern(patternText: string, u: boolean) { // TODO: Should u be a `BooleanValue`?
+  const parse = (flags: { U: boolean, N: boolean }) => {
     const p = new RegExpParser(patternText);
     return p.scope(flags, () => p.parsePattern());
   };

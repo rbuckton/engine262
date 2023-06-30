@@ -1,6 +1,6 @@
 // @ts-nocheck
 import {
-  Type, UndefinedValue, JSStringValue, SymbolValue,
+  Type, UndefinedValue, StringValue, SymbolValue,
   ObjectValue,
   Value,
   NumberValue,
@@ -8,11 +8,12 @@ import {
   wellKnownSymbols,
   NullValue,
   BooleanValue,
+  type PropertyKeyValue,
 } from '../value.mjs';
 import {
   surroundingAgent,
 } from '../engine.mjs';
-import { Q, X } from '../completion.mjs';
+import { C, NormalCompletion, Q, ThrowCompletion, X, type ValueOrThrowCompletion } from '../completion.mjs';
 import { OutOfRange } from '../helpers.mjs';
 import { MV_StringNumericLiteral } from '../runtime-semantics/all.mjs';
 import {
@@ -29,7 +30,7 @@ import {
 } from './all.mjs';
 
 /** https://tc39.es/ecma262/#sec-toprimitive */
-export function ToPrimitive(input, preferredType) {
+export function ToPrimitive(input: Value, preferredType?: 'string' | 'number'): NormalCompletion<Value> | ThrowCompletion {
   // 1. Assert: input is an ECMAScript language value.
   Assert(input instanceof Value);
   // 2. If Type(input) is Object, then
@@ -54,20 +55,20 @@ export function ToPrimitive(input, preferredType) {
       const result = Q(Call(exoticToPrim, input, [hint]));
       // v. If Type(result) is not Object, return result.
       if (!(result instanceof ObjectValue)) {
-        return result;
+        return C(result);
       }
       // vi. Throw a TypeError exception.
-      return surroundingAgent.Throw('TypeError', 'ObjectToPrimitive');
+      return C(surroundingAgent.Throw('TypeError', 'ObjectToPrimitive'));
     }
     // c. If preferredType is not present, let preferredType be number.
     if (preferredType === undefined) {
       preferredType = 'number';
     }
     // d. Return ? OrdinaryToPrimitive(input, preferredType).
-    return Q(OrdinaryToPrimitive(input, preferredType));
+    return C(Q(OrdinaryToPrimitive(input, preferredType)));
   }
   // 3. Return input.
-  return input;
+  return C(input);
 }
 
 /** https://tc39.es/ecma262/#sec-ordinarytoprimitive */
@@ -104,7 +105,7 @@ export function OrdinaryToPrimitive(O, hint) {
 }
 
 /** https://tc39.es/ecma262/#sec-toboolean */
-export function ToBoolean(argument) {
+export function ToBoolean(argument: Value): BooleanValue {
   if (argument instanceof UndefinedValue) {
     // Return false.
     return Value.false;
@@ -120,7 +121,7 @@ export function ToBoolean(argument) {
       return Value.false;
     }
     return Value.true;
-  } else if (argument instanceof JSStringValue) {
+  } else if (argument instanceof StringValue) {
     // If argument is the empty String, return false; otherwise return true.
     if (argument.stringValue().length === 0) {
       return Value.false;
@@ -143,48 +144,48 @@ export function ToBoolean(argument) {
 }
 
 /** https://tc39.es/ecma262/#sec-tonumeric */
-export function ToNumeric(value) {
+export function ToNumeric(value: Value): NormalCompletion<NumberValue | BigIntValue> | ThrowCompletion {
   // 1. Let primValue be ? ToPrimitive(value, number).
   const primValue = Q(ToPrimitive(value, 'number'));
   // 2. If Type(primValue) is BigInt, return primValue.
   if (primValue instanceof BigIntValue) {
-    return primValue;
+    return C(primValue);
   }
   // 3. Return ? ToNumber(primValue).
-  return Q(ToNumber(primValue));
+  return C(Q(ToNumber(primValue)));
 }
 
 /** https://tc39.es/ecma262/#sec-tonumber */
-export function ToNumber(argument) {
+export function ToNumber(argument: Value): NormalCompletion<NumberValue> | ThrowCompletion {
   if (argument instanceof UndefinedValue) {
     // Return NaN.
-    return F(NaN);
+    return C(F(NaN));
   } else if (argument instanceof NullValue) {
     // Return +0𝔽.
-    return F(+0);
+    return C(F(+0));
   } else if (argument instanceof BooleanValue) {
     // If argument is true, return 1𝔽.
     if (argument === Value.true) {
-      return F(1);
+      return C(F(1));
     }
     // If argument is false, return +0𝔽.
-    return F(+0);
+    return C(F(+0));
   } else if (argument instanceof NumberValue) {
     // Return argument (no conversion).
-    return argument;
-  } else if (argument instanceof JSStringValue) {
-    return MV_StringNumericLiteral(argument.stringValue());
+    return C(argument);
+  } else if (argument instanceof StringValue) {
+    return C(MV_StringNumericLiteral(argument.stringValue()));
   } else if (argument instanceof BigIntValue) {
     // Throw a TypeError exception.
-    return surroundingAgent.Throw('TypeError', 'CannotMixBigInts');
+    return C(surroundingAgent.Throw('TypeError', 'CannotMixBigInts'));
   } else if (argument instanceof SymbolValue) {
     // Throw a TypeError exception.
-    return surroundingAgent.Throw('TypeError', 'CannotConvertSymbol', 'number');
+    return C(surroundingAgent.Throw('TypeError', 'CannotConvertSymbol', 'number'));
   } else if (argument instanceof ObjectValue) {
     // 1. Let primValue be ? ToPrimitive(argument, number).
     const primValue = Q(ToPrimitive(argument, 'number'));
     // 2. Return ? ToNumber(primValue).
-    return Q(ToNumber(primValue));
+    return C(Q(ToNumber(primValue)));
   }
   throw new OutOfRange('ToNumber', { type: Type(argument), argument });
 }
@@ -379,11 +380,11 @@ export function ToBigInt(argument) {
   } else if (prim instanceof NumberValue) {
     // Throw a TypeError exception.
     return surroundingAgent.Throw('TypeError', 'CannotConvertToBigInt', prim);
-  } else if (prim instanceof JSStringValue) {
+  } else if (prim instanceof StringValue) {
     // 1. Let n be ! StringToBigInt(prim).
     const n = X(StringToBigInt(prim));
     // 2. If n is NaN, throw a SyntaxError exception.
-    if (Number.isNaN(n)) {
+    if (n instanceof UndefinedValue) {
       return surroundingAgent.Throw('SyntaxError', 'CannotConvertToBigInt', prim);
     }
     // 3. Return n.
@@ -396,7 +397,7 @@ export function ToBigInt(argument) {
 }
 
 /** https://tc39.es/ecma262/#sec-stringtobigint */
-export function StringToBigInt(argument) {
+export function StringToBigInt(argument: StringValue): BigIntValue | UndefinedValue {
   // Apply the algorithm in 7.1.4.1 (#sec-tonumber-applied-to-the-string-type) with the following changes:
   // 1. Replace the StrUnsignedDecimalLiteral production with DecimalDigits to not allow Infinity, decimal points, or exponents.
   // 2. If the MV is NaN, return NaN, otherwise return the BigInt which exactly corresponds to the MV, rather than rounding to a Number.
@@ -404,7 +405,7 @@ export function StringToBigInt(argument) {
   try {
     return Z(BigInt(argument.stringValue()));
   } catch {
-    return NaN;
+    return Value.undefined;
   }
 }
 
@@ -432,87 +433,87 @@ export function ToBigUint64(argument) {
 }
 
 /** https://tc39.es/ecma262/#sec-tostring */
-export function ToString(argument) {
+export function ToString(argument: Value): NormalCompletion<StringValue> | ThrowCompletion {
   if (argument instanceof UndefinedValue) {
     // Return "undefined".
-    return new JSStringValue('undefined');
+    return C(Value('undefined'));
   } else if (argument instanceof NullValue) {
     // Return "null".
-    return new JSStringValue('null');
+    return C(Value('null'));
   } else if (argument instanceof BooleanValue) {
     // If argument is true, return "true".
     // If argument is false, return "false".
-    return new JSStringValue(argument === Value.true ? 'true' : 'false');
+    return C(Value(argument === Value.true ? 'true' : 'false'));
   } else if (argument instanceof NumberValue) {
     // Return ! Number::toString(argument).
-    return X(NumberValue.toString(argument));
-  } else if (argument instanceof JSStringValue) {
+    return C(X(NumberValue.toString(argument)));
+  } else if (argument instanceof StringValue) {
     // Return argument.
-    return argument;
+    return C(argument);
   } else if (argument instanceof SymbolValue) {
     // Throw a TypeError exception.
-    return surroundingAgent.Throw('TypeError', 'CannotConvertSymbol', 'string');
+    return C(surroundingAgent.Throw('TypeError', 'CannotConvertSymbol', 'string'));
   } else if (argument instanceof BigIntValue) {
     // Return ! BigInt::toString(argument).
-    return X(BigIntValue.toString(argument));
+    return C(X(BigIntValue.toString(argument)));
   } else if (argument instanceof ObjectValue) {
     // 1. Let primValue be ? ToPrimitive(argument, string).
     const primValue = Q(ToPrimitive(argument, 'string'));
     // 2. Return ? ToString(primValue).
-    return Q(ToString(primValue));
+    return C(Q(ToString(primValue)));
   }
   throw new OutOfRange('ToString', { type: Type(argument), argument });
 }
 
 /** https://tc39.es/ecma262/#sec-toobject */
-export function ToObject(argument) {
+export function ToObject(argument): ValueOrThrowCompletion<ObjectValue> {
   if (argument instanceof UndefinedValue) {
     // Throw a TypeError exception.
-    return surroundingAgent.Throw('TypeError', 'CannotConvertToObject', 'undefined');
+    return C(surroundingAgent.Throw('TypeError', 'CannotConvertToObject', 'undefined'));
   } else if (argument instanceof NullValue) {
     // Throw a TypeError exception.
-    return surroundingAgent.Throw('TypeError', 'CannotConvertToObject', 'null');
+    return C(surroundingAgent.Throw('TypeError', 'CannotConvertToObject', 'null'));
   } else if (argument instanceof BooleanValue) {
     // Return a new Boolean object whose [[BooleanData]] internal slot is set to argument.
     const obj = OrdinaryObjectCreate(surroundingAgent.intrinsic('%Boolean.prototype%'), ['BooleanData']);
     obj.BooleanData = argument;
-    return obj;
+    return C(obj);
   } else if (argument instanceof NumberValue) {
     // Return a new Number object whose [[NumberData]] internal slot is set to argument.
     const obj = OrdinaryObjectCreate(surroundingAgent.intrinsic('%Number.prototype%'), ['NumberData']);
     obj.NumberData = argument;
-    return obj;
-  } else if (argument instanceof JSStringValue) {
+    return C(obj);
+  } else if (argument instanceof StringValue) {
     // Return a new String object whose [[StringData]] internal slot is set to argument.
-    return StringCreate(argument, surroundingAgent.intrinsic('%String.prototype%'));
+    return C(StringCreate(argument, surroundingAgent.intrinsic('%String.prototype%')));
   } else if (argument instanceof SymbolValue) {
     // Return a new Symbol object whose [[SymbolData]] internal slot is set to argument.
     const obj = OrdinaryObjectCreate(surroundingAgent.intrinsic('%Symbol.prototype%'), ['SymbolData']);
     obj.SymbolData = argument;
-    return obj;
+    return C(obj);
   } else if (argument instanceof BigIntValue) {
     // Return a new BigInt object whose [[BigIntData]] internal slot is set to argument.
     const obj = OrdinaryObjectCreate(surroundingAgent.intrinsic('%BigInt.prototype%'), ['BigIntData']);
     obj.BigIntData = argument;
-    return obj;
+    return C(obj);
   } else if (argument instanceof ObjectValue) {
     // Return argument.
-    return argument;
+    return C(argument);
   }
   throw new OutOfRange('ToObject', { type: Type(argument), argument });
 }
 
 /** https://tc39.es/ecma262/#sec-topropertykey */
-export function ToPropertyKey(argument) {
+export function ToPropertyKey(argument: Value): NormalCompletion<PropertyKeyValue> | ThrowCompletion {
   // 1. Let key be ? ToPrimitive(argument, string).
   const key = Q(ToPrimitive(argument, 'string'));
   // 2. If Type(key) is Symbol, then
   if (key instanceof SymbolValue) {
     // a. Return key.
-    return key;
+    return C(key);
   }
   // 3. Return ! ToString(key).
-  return X(ToString(key));
+  return C(X(ToString(key)));
 }
 
 /** https://tc39.es/ecma262/#sec-tolength */
@@ -530,7 +531,7 @@ export function ToLength(argument) {
 /** https://tc39.es/ecma262/#sec-canonicalnumericindexstring */
 export function CanonicalNumericIndexString(argument) {
   // 1. Assert: Type(argument) is String.
-  Assert(argument instanceof JSStringValue);
+  Assert(argument instanceof StringValue);
   // 2. If argument is "-0", return -0𝔽.
   if (argument.stringValue() === '-0') {
     return F(-0);

@@ -1,31 +1,30 @@
-// @ts-nocheck
-import { Evaluate } from '../evaluator.mjs';
+import { Evaluation, type StatementEvaluator } from '../evaluator.mjs';
 import {
-  EnsureCompletion,
-  ReturnIfAbrupt,
   UpdateEmpty,
-  NormalCompletion,
+  C,
+  Q,
+  Completion,
 } from '../completion.mjs';
+import type { ParseNode } from '../parser/ParseNode.mjs';
 
 /** https://tc39.es/ecma262/#sec-block-runtime-semantics-evaluation */
-export function* Evaluate_StatementList(StatementList) {
+// TODO: Should be ParseNode.StatementList
+export function* Evaluate_StatementList(StatementList: ParseNode.ModuleItemList): StatementEvaluator {
   if (StatementList.length === 0) {
-    return NormalCompletion(undefined);
+    return C(undefined);
   }
 
-  let sl = yield* Evaluate(StatementList[0]);
+  // StatementList : StatementList StatementListItem
+  let sl;
+  sl = Q(yield* Evaluation(StatementList[0]));
   if (StatementList.length === 1) {
-    return sl;
+    return C(sl);
   }
 
   for (const StatementListItem of StatementList.slice(1)) {
-    ReturnIfAbrupt(sl);
-    let s = yield* Evaluate(StatementListItem);
-    // We don't always return a Completion value, but here we actually need it
-    // to be a Completion.
-    s = EnsureCompletion(s);
-    sl = UpdateEmpty(s, sl);
+    let s = Completion(yield* Evaluation(StatementListItem));
+    sl = Q(UpdateEmpty(s, sl));
   }
 
-  return sl;
+  return C(sl);
 }
